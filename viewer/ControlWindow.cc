@@ -66,11 +66,11 @@ ControlWindow::ControlWindow(const TGWindow *p, int w, int h)
         AddFrame(group[i], new TGLayoutHints(kLHintsTop | kLHintsLeft, 2, 2, 1, 1));
 
         group[i]->AddFrame(new TGLabel(group[i], "threshold: "), new TGLayoutHints(kLHintsTop | kLHintsLeft,  2, 2, 1, 1));
-        threshEntry[i] = new TGNumberEntry(group[i], 3, 5, -1,
+        threshEntry[i] = new TGNumberEntry(group[i], 500, 7, -1,
             TGNumberFormat::kNESInteger,
             TGNumberFormat::kNEANonNegative,
             TGNumberFormat::kNELLimitMinMax,
-            3, 30);
+            0, 100000);
         group[i]->AddFrame(threshEntry[i], new TGLayoutHints(kLHintsTop | kLHintsLeft,  1, 1, 1, 1));
     }
     group[0]->SetTitle("U Plane");

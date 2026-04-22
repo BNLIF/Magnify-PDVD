@@ -61,14 +61,19 @@ Data::Data(const char* filename, double threshold, const char* frame, int rebin)
         decon_ref[iplane] = dynamic_cast<TH2*>(rootFile->Get(decon_name[iplane]));
     }
 
-    // denoised (post noise-filter) — use decon geometry for dummies when missing
-    load_waveform("hu_raw" + suf, "U Plane (Denoised)", 1., threshold, decon_ref[0]);
-    load_waveform("hv_raw" + suf, "V Plane (Denoised)", 1., threshold, decon_ref[1]);
-    load_waveform("hw_raw" + suf, "W Plane (Denoised)", 1., threshold, decon_ref[2]);
+    // anodes 4-7 have 4x higher gain than 0-3, scale down accordingly
+    double raw_scale = 1.0;  // For top vs. bottm electronics, do we need to scale the raw differently? The overall gain, as well as the noise level ... 
 
-    // deconvoluted
+    // std::cout << "Loading histograms with raw_scale = " << raw_scale << " and threshold = " << threshold << " " << rebin << endl;
+
+    // denoised (post noise-filter) — use decon geometry for dummies when missing
+    load_waveform("hu_raw" + suf, "U Plane (Denoised)", raw_scale, threshold, decon_ref[0]);
+    load_waveform("hv_raw" + suf, "V Plane (Denoised)", raw_scale, threshold, decon_ref[1]);
+    load_waveform("hw_raw" + suf, "W Plane (Denoised)", raw_scale, threshold, decon_ref[2]);
+
+    // deconvoluted, scaled down by 1/25 ... 
     for (int iplane = 0; iplane < 3; ++iplane) {
-        load_waveform(decon_name[iplane], Form("%c Plane (Deconvoluted)", 'U'+iplane), 1./(500.*rebin/4.0), threshold);
+        load_waveform(decon_name[iplane], Form("%c Plane (Deconvoluted)", 'U'+iplane), 1./(100.*rebin/4.0) * raw_scale, threshold);
     }
 
     load_rawwaveform("hu_orig" + suf, "hu_baseline" + suf);
@@ -78,6 +83,17 @@ Data::Data(const char* filename, double threshold, const char* frame, int rebin)
     load_threshold("hu_threshold" + suf);
     load_threshold("hv_threshold" + suf);
     load_threshold("hw_threshold" + suf);
+
+    // Apply per-channel Wiener thresholds with plane-type-specific scaling.
+    // Raw signal scale by 0.5 ... 
+    // decon  5.0 * 
+    double denoised_scaling = 0.5;
+    for (int i = 0; i < 3; ++i) {
+        if (thresh_histos[i]->GetMaximum() > 0) {
+            wfs[i]->SetThreshold(thresh_histos[i], denoised_scaling);
+            wfs[i+3]->SetThreshold(thresh_histos[i], 5.0);
+        }
+    }
 }
 
 void Data::load_runinfo()

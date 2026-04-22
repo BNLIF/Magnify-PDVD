@@ -135,6 +135,13 @@ void Waveforms::SetThreshold(TH1I *h, double scaling)
 {
     Clear();
     useChannelThreshold = true;
+    // compute mean non-zero channel threshold for GUI display (in ADC units)
+    double sum = 0; int n = 0;
+    for (int b = 1; b <= h->GetNbinsX(); ++b) {
+        double v = h->GetBinContent(b);
+        if (v > 0) { sum += v; ++n; }
+    }
+    if (n > 0) threshold = (sum / n) * scaling * fScale;
     TBox *box = 0;
     cout << fName << ": creating boxes ... " << flush;
     for (int i=1; i<=nChannels; i++) {
