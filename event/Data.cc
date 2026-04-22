@@ -85,15 +85,17 @@ Data::Data(const char* filename, double threshold, const char* frame, int rebin)
     load_threshold("hw_threshold" + suf);
 
     // Apply per-channel Wiener thresholds with plane-type-specific scaling.
-    // Raw signal scale by 0.5 ... 
-    // decon  5.0 * 
-    double denoised_scaling = 0.5;
+    // Raw signal scale by 0.5 ...
+    // decon  5.0 *
+    denoised_scaling = 0.5;
+    decon_scaling    = 5.0;
     for (int i = 0; i < 3; ++i) {
         if (thresh_histos[i]->GetMaximum() > 0) {
             wfs[i]->SetThreshold(thresh_histos[i], denoised_scaling);
-            wfs[i+3]->SetThreshold(thresh_histos[i], 5.0);
+            wfs[i+3]->SetThreshold(thresh_histos[i], decon_scaling);
         }
     }
+
 }
 
 void Data::load_runinfo()

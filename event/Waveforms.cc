@@ -142,6 +142,7 @@ void Waveforms::SetThreshold(TH1I *h, double scaling)
         if (v > 0) { sum += v; ++n; }
     }
     if (n > 0) threshold = (sum / n) * scaling * fScale;
+
     TBox *box = 0;
     cout << fName << ": creating boxes ... " << flush;
     for (int i=1; i<=nChannels; i++) {

@@ -148,11 +148,22 @@ void GuiController::UpdateShowBadChannel()
 
 void GuiController::ThresholdChanged(int i)
 {
+    // newThresh is an ADC-unit cutoff (widget is seeded from denoised display units
+    // where fScale=1, so widget value == ADC value).  Apply it as an ADC cutoff to
+    // all waveforms for this plane so both denoised and decon cut at the same ADC
+    // level: pass newThresh * fScale so that |hOrig*fScale| > newThresh*fScale
+    // reduces to |hOrig_ADC| > newThresh.
+    // Widget value is the denoised ADC threshold.  Decon is kept at a fixed ratio
+    // (decon_scaling / denoised_scaling) higher in ADC space, matching the startup
+    // per-channel relationship.
     int newThresh = cw->threshEntry[i]->GetNumber();
-    cout << "new threshold: " << newThresh << endl;
+    double scalingRatio = data->decon_scaling / data->denoised_scaling;
     for (int ind=i; ind<6; ind+=3) {
         vw->can->cd(ind+1);
-        data->wfs.at(ind)->SetThreshold(newThresh);
+        double fS = data->wfs.at(ind)->fScale;
+        double adcCutoff = (ind < 3) ? newThresh : newThresh * scalingRatio;
+        double displayThresh = adcCutoff * fS;
+        data->wfs.at(ind)->SetThreshold(displayThresh);
         data->wfs.at(ind)->Draw2D();
         vw->can->GetPad(ind+1)->Modified();
         vw->can->GetPad(ind+1)->Update();
@@ -161,13 +172,18 @@ void GuiController::ThresholdChanged(int i)
 
 void GuiController::SetChannelThreshold()
 {
-    // cout << "new threshold: " << newThresh << endl;
-
+    // Reset all 6 waveforms (denoised + decon for all 3 planes) to per-channel
+    // Wiener thresholds.  Denoised always uses scaling=0.5; decon uses the
+    // user-entered multiplier from threshScaleEntry.
     TH1I *ht = 0;
-    for (int ind=3; ind<6; ind++) {
+    double decon_scale = cw->threshScaleEntry->GetNumber();
+    for (int ind=0; ind<6; ind++) {
         vw->can->cd(ind+1);
-        ht = data->thresh_histos.at(ind-3);
-        data->wfs.at(ind)->SetThreshold(ht, cw->threshScaleEntry->GetNumber());
+        ht = data->thresh_histos.at(ind % 3);
+        double scaling = (ind < 3) ? data->denoised_scaling : decon_scale;
+        data->wfs.at(ind)->SetThreshold(ht, scaling);
+        // update the widget to reflect the new denoised threshold
+        if (ind < 3) cw->threshEntry[ind]->SetNumber(data->wfs.at(ind)->threshold);
         data->wfs.at(ind)->Draw2D();
         vw->can->GetPad(ind+1)->Modified();
         vw->can->GetPad(ind+1)->Update();
