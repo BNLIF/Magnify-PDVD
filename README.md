@@ -45,6 +45,24 @@ cd scripts/
 root -l loadClasses.C Magnify.C
 ```
 
+### Per-Channel RMS Noise Analysis
+
+Computes per-channel noise RMS for one or more Magnify ROOT files in batch (no display).  Output is written alongside each input as `<file>.rms.root`.
+
+```
+./scripts/run_rms_analysis.sh input_files/040475_1/magnify-run040475-evt1-anode0.root
+# or process multiple files at once
+./scripts/run_rms_analysis.sh input_files/040475_1/magnify-run040475-evt1-anode*.root
+./scripts/run_rms_analysis.sh input_files/*/magnify-*.root
+```
+
+The algorithm follows the WCT percentile-based method (matching `Microboone.cxx`):
+1. Preliminary RMS on unflagged ADC samples.
+2. Signal flagging: mark |ADC| > 4×RMS bins, padded ±8 ticks.
+3. Final RMS recomputed with signal-flagged samples excluded.
+
+Results are stored in a `TTree` (one row per channel) inside the `.rms.root` cache file and are automatically loaded by the viewer at startup to apply per-channel Wiener thresholds.
+
 ### (Experimental feature) Channel Scan
 ```
 ./channelscan.sh path/to/rootfile
