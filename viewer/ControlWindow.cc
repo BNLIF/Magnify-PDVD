@@ -62,6 +62,9 @@ ControlWindow::ControlWindow(const TGWindow *p, int w, int h)
     regionSumBtn = new TGTextButton(group_general, "Region Sum");
     group_general->AddFrame(regionSumBtn, new TGLayoutHints(kLHintsTop | kLHintsLeft, 6, 2, 2, 2));
 
+    rmsBtn = new TGTextButton(group_general, "RMS Analysis");
+    group_general->AddFrame(rmsBtn, new TGLayoutHints(kLHintsTop | kLHintsLeft, 6, 2, 2, 2));
+
     TGGroupFrame *group[3];
     for (int i=0; i<3; i++) {
         group[i] = new TGGroupFrame(this, "", kHorizontalFrame);

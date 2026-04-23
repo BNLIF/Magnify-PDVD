@@ -29,6 +29,7 @@ public:
     TGTextButton  *setThreshButton;
     TGNumberEntry *threshScaleEntry;
     TGTextButton  *regionSumBtn;
+    TGTextButton  *rmsBtn;
 
     ClassDef(ControlWindow, 0)
 };

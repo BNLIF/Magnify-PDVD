@@ -17,6 +17,7 @@ void loadClasses()
 
     prefix = "../viewer";
     gROOT->ProcessLine( include + pwd + prefix );
+    gROOT->ProcessLine( load + prefix + "/RmsAnalyzer.cc+" );
     gROOT->ProcessLine( load + prefix + "/ViewWindow.cc+" );
     gROOT->ProcessLine( load + prefix + "/ControlWindow.cc+" );
     gROOT->ProcessLine( load + prefix + "/MainWindow.cc+" );

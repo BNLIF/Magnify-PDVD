@@ -6,6 +6,7 @@
 #include "Waveforms.h"
 #include "RawWaveforms.h"
 #include "BadChannels.h"
+#include "RmsAnalyzer.h"
 
 #include "TApplication.h"
 #include "TSystem.h"
@@ -17,6 +18,8 @@
 #include "TGMenu.h"
 #include "TGNumberEntry.h"
 #include "TCanvas.h"
+#include "TFile.h"
+#include "TGraph.h"
 #include "TH2F.h"
 #include "TH1F.h"
 #include "TH2I.h"
@@ -28,6 +31,7 @@
 #include "TLegend.h"
 #include "TGButton.h"
 #include "TGLabel.h"
+#include "TGTextEntry.h"
 #include "TRootEmbeddedCanvas.h"
 #include "TGClient.h"
 
@@ -62,6 +66,11 @@ GuiController::GuiController(const TGWindow *p, int w, int h, const char* fn, do
         regTLowE[p]  = regTHighE[p]  = nullptr;
         for (int e = 0; e < 4; ++e) regionBoundary[p][e] = nullptr;
     }
+    rmsWindow      = nullptr;
+    rmsStatusLabel = nullptr;
+    rmsOverlayCheck = nullptr;
+    rmsDistCanvas  = nullptr;
+    rmsLoaded      = false;
     mw->SetWindowName(TString::Format("Magnify: run %i, sub-run %i, event %i, anode %i",
         data->runNo, data->subRunNo, data->eventNo, data->anodeNo));
 
@@ -120,6 +129,7 @@ void GuiController::InitConnections()
     cw->unZoomButton->Connect("Clicked()", "GuiController", this, "UnZoom()");
 
     cw->regionSumBtn->Connect("Clicked()", "GuiController", this, "ShowRegionWindow()");
+    cw->rmsBtn->Connect("Clicked()", "GuiController", this, "ShowRmsWindow()");
 
     // stupid way to connect signal and slots
     vw->can->GetPad(1)->Connect("RangeChanged()", "GuiController", this, "SyncTimeAxis0()");
@@ -349,6 +359,20 @@ void GuiController::ChannelChanged()
     l->SetLineColor(kMagenta);
     l->SetLineWidth(2);
     l->Draw();
+
+    // RMS overlay: ±4σ lines when analysis results are loaded and checkbox is on
+    if (rmsLoaded && rmsOverlayCheck && rmsOverlayCheck->IsDown()) {
+        int idx = channel - data->wfs.at(wfsNo)->firstChannel;
+        if (idx >= 0 && idx < (int)rmsResults[wfsNo].size()) {
+            float rmsDisplay = rmsResults[wfsNo][idx].rms_final * data->wfs.at(wfsNo)->fScale;
+            int nT = data->wfs.at(wfsNo)->nTDCs;
+            TLine *rp = new TLine(0,  rmsDisplay * 4, nT,  rmsDisplay * 4);
+            TLine *rm = new TLine(0, -rmsDisplay * 4, nT, -rmsDisplay * 4);
+            rp->SetLineColor(kCyan + 2); rp->SetLineWidth(2); rp->SetLineStyle(2);
+            rm->SetLineColor(kCyan + 2); rm->SetLineWidth(2); rm->SetLineStyle(2);
+            rp->Draw(); rm->Draw();
+        }
+    }
 
     TH1I *hh = nullptr;
     if (cw->rawWfButton->IsDown()) {
@@ -837,6 +861,239 @@ void GuiController::ClearRegion()
         sc->Clear();
         sc->Update();
     }
+}
+
+// ---- RMS Analysis panel ----
+
+void GuiController::ShowRmsWindow()
+{
+    if (!rmsWindow) {
+        rmsWindow = new TGMainFrame(gClient->GetRoot(), 440, 200);
+        rmsWindow->SetWindowName("RMS Analysis");
+        rmsWindow->DontCallClose();
+        rmsWindow->Connect("CloseWindow()", "GuiController", this, "HideRmsWindow()");
+
+        // Status row
+        TGHorizontalFrame* statusRow = new TGHorizontalFrame(rmsWindow);
+        rmsWindow->AddFrame(statusRow, new TGLayoutHints(kLHintsTop | kLHintsExpandX, 8, 8, 8, 2));
+        statusRow->AddFrame(new TGLabel(statusRow, "Cache: "),
+            new TGLayoutHints(kLHintsLeft | kLHintsCenterY, 2, 2, 2, 2));
+        rmsStatusLabel = new TGLabel(statusRow, "(not loaded)");
+        statusRow->AddFrame(rmsStatusLabel,
+            new TGLayoutHints(kLHintsLeft | kLHintsCenterY, 2, 2, 2, 2));
+
+        // Button row
+        TGHorizontalFrame* btnRow = new TGHorizontalFrame(rmsWindow);
+        rmsWindow->AddFrame(btnRow, new TGLayoutHints(kLHintsTop | kLHintsCenterX, 8, 8, 6, 4));
+
+        TGTextButton* b;
+        b = new TGTextButton(btnRow, "Compute RMS");
+        b->Connect("Clicked()", "GuiController", this, "ComputeRms()");
+        btnRow->AddFrame(b, new TGLayoutHints(kLHintsLeft, 5, 5, 2, 2));
+
+        b = new TGTextButton(btnRow, "Load from file");
+        b->Connect("Clicked()", "GuiController", this, "LoadRmsFromFile()");
+        btnRow->AddFrame(b, new TGLayoutHints(kLHintsLeft, 5, 5, 2, 2));
+
+        b = new TGTextButton(btnRow, "Show distribution");
+        b->Connect("Clicked()", "GuiController", this, "ShowRmsDistribution()");
+        btnRow->AddFrame(b, new TGLayoutHints(kLHintsLeft, 5, 5, 2, 2));
+
+        // Overlay checkbox
+        TGHorizontalFrame* overlayRow = new TGHorizontalFrame(rmsWindow);
+        rmsWindow->AddFrame(overlayRow, new TGLayoutHints(kLHintsTop | kLHintsLeft, 8, 8, 4, 8));
+        rmsOverlayCheck = new TGCheckButton(overlayRow, "Overlay 4σ on 1D waveform");
+        rmsOverlayCheck->SetState(kButtonUp);
+        rmsOverlayCheck->Connect("Toggled(Bool_t)", "GuiController", this, "ToggleRmsOverlay()");
+        overlayRow->AddFrame(rmsOverlayCheck, new TGLayoutHints(kLHintsLeft, 2, 2, 2, 2));
+
+        rmsWindow->MapSubwindows();
+        rmsWindow->Resize(rmsWindow->GetDefaultSize());
+        rmsWindow->MapWindow();
+    } else {
+        rmsWindow->RaiseWindow();
+        rmsWindow->MapWindow();
+    }
+
+    // Refresh status label to show current cache filename
+    TString cacheFile = RmsAnalyzer::CacheFilename(data->rootFile->GetName());
+    bool exists = !gSystem->AccessPathName(cacheFile.Data());
+    rmsStatusLabel->SetText(
+        exists ? TString::Format("%s  [EXISTS]", cacheFile.Data()).Data()
+               : TString::Format("%s  [not found]", cacheFile.Data()).Data()
+    );
+    rmsWindow->Layout();
+}
+
+void GuiController::HideRmsWindow()
+{
+    if (rmsWindow) rmsWindow->UnmapWindow();
+}
+
+void GuiController::ComputeRms()
+{
+    printf("RMS Analysis: computing ...\n");
+    for (int p = 0; p < 3; ++p) {
+        TH2F* h = data->wfs.at(p)->hOrig;
+        if (!h) {
+            printf("RMS Analysis: plane %d hOrig is null, skipping\n", p);
+            rmsResults[p].clear();
+            continue;
+        }
+        printf("  plane %d (%s): %d channels x %d ticks\n",
+            p, h->GetName(), h->GetNbinsX(), h->GetNbinsY());
+        rmsResults[p] = RmsAnalyzer::AnalyzePlane(h);
+        gSystem->ProcessEvents();
+    }
+
+    TString cacheFile = RmsAnalyzer::CacheFilename(data->rootFile->GetName());
+    RmsAnalyzer::Save(rmsResults[0], rmsResults[1], rmsResults[2], cacheFile.Data());
+    rmsLoaded = true;
+
+    if (rmsStatusLabel)
+        rmsStatusLabel->SetText(
+            TString::Format("%s  [EXISTS]", cacheFile.Data()).Data()
+        );
+    if (rmsWindow) rmsWindow->Layout();
+    printf("RMS Analysis: done.\n");
+}
+
+void GuiController::LoadRmsFromFile()
+{
+    TString cacheFile = RmsAnalyzer::CacheFilename(data->rootFile->GetName());
+    if (!RmsAnalyzer::Load(cacheFile.Data(), rmsResults[0], rmsResults[1], rmsResults[2])) {
+        printf("RMS Analysis: failed to load %s\n", cacheFile.Data());
+        rmsLoaded = false;
+        if (rmsStatusLabel)
+            rmsStatusLabel->SetText(
+                TString::Format("%s  [LOAD FAILED]", cacheFile.Data()).Data()
+            );
+    } else {
+        rmsLoaded = true;
+        printf("RMS Analysis: loaded %s  (U:%zu V:%zu W:%zu channels)\n",
+            cacheFile.Data(),
+            rmsResults[0].size(), rmsResults[1].size(), rmsResults[2].size());
+        if (rmsStatusLabel)
+            rmsStatusLabel->SetText(
+                TString::Format("%s  [LOADED]", cacheFile.Data()).Data()
+            );
+    }
+    if (rmsWindow) rmsWindow->Layout();
+}
+
+void GuiController::ShowRmsDistribution()
+{
+    if (!rmsLoaded) {
+        printf("RMS Analysis: no results loaded — compute or load first\n");
+        return;
+    }
+
+    // Create or raise the distribution canvas
+    TString canvName = "rmsDistCanvas";
+    if (!rmsDistCanvas || !gROOT->FindObject(canvName)) {
+        rmsDistCanvas = new TCanvas(canvName, "RMS Noise Distribution", 900, 700);
+        rmsDistCanvas->Connect(
+            "ProcessedEvent(Int_t,Int_t,Int_t,TObject*)",
+            "GuiController", this,
+            "ProcessRmsCanvasEvent(Int_t,Int_t,Int_t,TObject*)"
+        );
+    } else {
+        rmsDistCanvas->cd();
+        rmsDistCanvas->Clear();
+        rmsDistCanvas->RaiseWindow();
+    }
+
+    rmsDistCanvas->Divide(2, 2);
+
+    static const char* planeLetter[3] = {"U", "V", "W"};
+    static const Color_t planeColor[3] = {kRed, kBlue, kGreen + 2};
+
+    // Find global RMS range for the distribution histogram
+    float maxRms = 0.f;
+    for (int p = 0; p < 3; ++p)
+        for (const auto& r : rmsResults[p])
+            if (r.rms_final > maxRms) maxRms = r.rms_final;
+    if (maxRms <= 0.f) maxRms = 10.f;
+    int nBins = 100;
+    float rmsHi = maxRms * 1.2f;
+
+    // Pad 1: overlay 1D distribution of final RMS for U/V/W
+    rmsDistCanvas->cd(1);
+    TH1F* hDist[3] = {};
+    for (int p = 0; p < 3; ++p) {
+        TString hname = TString::Format("hRmsDist_%s", planeLetter[p]);
+        TH1F* hOld = (TH1F*)gDirectory->FindObject(hname);
+        if (hOld) delete hOld;
+        hDist[p] = new TH1F(hname,
+            TString::Format("%s plane; RMS (ADC); Channels", planeLetter[p]),
+            nBins, 0, rmsHi);
+        for (const auto& r : rmsResults[p])
+            hDist[p]->Fill(r.rms_final);
+        hDist[p]->SetLineColor(planeColor[p]);
+        hDist[p]->SetLineWidth(2);
+    }
+    // Find y-max across planes for a shared range
+    float yMax = 0.f;
+    for (int p = 0; p < 3; ++p)
+        if (hDist[p]->GetMaximum() > yMax) yMax = hDist[p]->GetMaximum();
+    for (int p = 0; p < 3; ++p) {
+        hDist[p]->GetYaxis()->SetRangeUser(0, yMax * 1.15f);
+        hDist[p]->SetTitle("Per-channel noise RMS; RMS (ADC); Channels");
+        hDist[p]->Draw(p == 0 ? "hist" : "hist same");
+    }
+    TLegend* leg = new TLegend(0.65, 0.7, 0.92, 0.92);
+    for (int p = 0; p < 3; ++p)
+        leg->AddEntry(hDist[p], TString::Format("%s  (n=%d)", planeLetter[p],
+            (int)rmsResults[p].size()), "l");
+    leg->Draw();
+    gPad->SetGridx(); gPad->SetGridy();
+
+    // Pads 2/3/4: RMS vs channel for U/V/W
+    for (int p = 0; p < 3; ++p) {
+        rmsDistCanvas->cd(p + 2);
+        const auto& res = rmsResults[p];
+        int n = (int)res.size();
+        TGraph* gr = new TGraph(n);
+        for (int i = 0; i < n; ++i)
+            gr->SetPoint(i, res[i].channel, res[i].rms_final);
+
+        TString grTitle = TString::Format(
+            "%s plane RMS vs channel; Channel; RMS (ADC)", planeLetter[p]);
+        gr->SetTitle(grTitle);
+        gr->SetMarkerStyle(20);
+        gr->SetMarkerSize(0.5);
+        gr->SetMarkerColor(planeColor[p]);
+        gr->SetLineColor(planeColor[p]);
+        gr->Draw("AP");
+        gPad->SetGridx(); gPad->SetGridy();
+    }
+
+    rmsDistCanvas->Update();
+}
+
+void GuiController::ProcessRmsCanvasEvent(Int_t ev, Int_t x, Int_t y, TObject* selected)
+{
+    if (ev != 11) return;  // only left-click
+    if (!rmsDistCanvas) return;
+
+    TVirtualPad* pad = rmsDistCanvas->GetClickSelectedPad();
+    if (!pad) return;
+    int padNo = pad->GetNumber();
+    // Pads 2/3/4 are the per-plane RMS-vs-channel graphs (U/V/W)
+    if (padNo < 2 || padNo > 4) return;
+
+    double xx = pad->AbsPixeltoX(x);
+    int chanNo = TMath::Nint(xx);
+    cout << "RMS canvas click: pad " << padNo << "  channel=" << chanNo << endl;
+
+    cw->channelEntry->SetNumber(chanNo);
+    ChannelChanged();
+}
+
+void GuiController::ToggleRmsOverlay()
+{
+    // Redraw the current 1D waveform to add or remove the overlay
+    ChannelChanged();
 }
 
 void GuiController::HandleMenu(int id)
