@@ -11,6 +11,7 @@ class ViewWindow;
 class ControlWindow;
 class Data;
 class TH1F;
+class TH2F;
 class TCanvas;
 class TGMainFrame;
 class TRootEmbeddedCanvas;
@@ -18,6 +19,7 @@ class TGNumberEntry;
 class TGLabel;
 class TGCheckButton;
 class TLine;
+class TPad;
 
 
 class GuiController
@@ -104,6 +106,15 @@ private:
     TCanvas*              rmsDistCanvas;
     std::vector<ChannelRms> rmsResults[3];  // per-plane results (U=0,V=1,W=2)
     bool                  rmsLoaded;
+
+    // FFT spectra: TH2F(channel × freq-MHz), one per plane; nullptr if not loaded
+    TH2F*  fftSpec[3];
+    int    fftSelectedCh[3];  // last-clicked channel per plane (-1 = none)
+
+    // Named pads inside rmsDistCanvas (owned by the canvas, not us)
+    TPad*  rmsTopPad;
+    TPad*  rmsMidPad[3];
+    TPad*  rmsBotPad[3];
 };
 
 #endif

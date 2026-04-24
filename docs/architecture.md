@@ -53,11 +53,14 @@ Magnify-protodune/
 │   ├── MainWindow.{h,cc}
 │   ├── ViewWindow.{h,cc}
 │   ├── ControlWindow.{h,cc}
-│   └── GuiController.{h,cc}
+│   ├── GuiController.{h,cc}
+│   └── RmsAnalyzer.{h,cc}      per-channel RMS + FFT noise analyzer
 ├── scripts/
 │   ├── loadClasses.C           ACLiC-compiles all event/ and viewer/ sources
 │   ├── Magnify.C               entry-point ROOT macro
-│   └── preprocess.C            merges per-APA histograms into whole-detector histograms
+│   ├── preprocess.C            merges per-APA histograms into whole-detector histograms
+│   ├── run_rms_analysis.C      batch ROOT macro: RMS + FFT for one Magnify file
+│   └── run_rms_analysis.sh     shell wrapper to run run_rms_analysis.C on one or more files
 └── test_feature/
     ├── channelscan/            per-channel FFT / PNG export tool
     ├── evd/                    sub-region 2-D image export (matplotlib PDF)
@@ -84,15 +87,18 @@ Magnify-protodune/
 | `viewer/MainWindow.{h,cc}` | Top-level `TGMainFrame` (1600 × 900). Contains a "File → Exit" menu bar, hosts `ViewWindow` on top and `ControlWindow` (fixed height 100 px) on the bottom. |
 | `viewer/ViewWindow.{h,cc}` | `TRootEmbeddedCanvas` holding a single `TCanvas` divided into a 3 × 3 pad grid (`can->Divide(3,3,…)`). Owns the four available color palettes (Rainbow, Gray, Fire, Summer). |
 | `viewer/ControlWindow.{h,cc}` | `TGHorizontalFrame` with all user-facing widgets: `channelEntry` (0–15359), `timeEntry` (0–6000), `threshEntry[3]` (per-plane threshold sliders), `zAxisRangeEntry[2]`, `timeRangeEntry[2]`, `adcRangeEntry[2]`, `threshScaleEntry`, and buttons `rawWfButton`, `badChanelButton`, `badOnlyButton`, `timeModeButton`, `setThreshButton`, `unZoomButton`. |
-| `viewer/GuiController.{h,cc}` | Owns `Data`, `MainWindow`, `ViewWindow`, `ControlWindow`. Wires ROOT signal/slot connections in `InitConnections()`. Key handlers: `ThresholdChanged()` (redraw TH2 with new threshold), `SetChannelThreshold()` (use per-channel threshold TH1 × scale factor for decon pads 4–6), `ZRangeChanged()` (update color axis on all 6 TH2 pads), `ChannelChanged()` (draw 1-D denoised + decon + threshold line + optional raw + bad-region boxes in the bottom pad for the selected plane), `TimeChanged()` (draw 1-D tick projection across channels for all 3 decon planes when time-mode is on), `SyncTimeAxis(i)` (propagates Y-axis zoom from any TH2 pad to the other five), `ProcessCanvasEvent()` (translates a canvas click to (channel, tick) and triggers `ChannelChanged` + `TimeChanged`). |
+| `viewer/GuiController.{h,cc}` | Owns `Data`, `MainWindow`, `ViewWindow`, `ControlWindow`. Wires ROOT signal/slot connections in `InitConnections()`. Key handlers: `ThresholdChanged()` (redraw TH2 with new threshold), `SetChannelThreshold()` (use per-channel threshold TH1 × scale factor for decon pads 4–6), `ZRangeChanged()` (update color axis on all 6 TH2 pads), `ChannelChanged()` (draw 1-D denoised + decon + threshold line + optional raw + bad-region boxes in the bottom pad for the selected plane), `TimeChanged()` (draw 1-D tick projection across channels for all 3 decon planes when time-mode is on), `SyncTimeAxis(i)` (propagates Y-axis zoom from any TH2 pad to the other five), `ProcessCanvasEvent()` (translates a canvas click to (channel, tick) and triggers `ChannelChanged` + `TimeChanged`). RMS/FFT panel: `ShowRmsWindow()` (floating control panel), `ComputeRms()` / `LoadRmsFromFile()` (compute or load RMS+FFT cache), `ShowRmsDistribution()` (7-pad canvas: top = RMS histogram, middle = RMS vs channel per plane, bottom = FFT spectra per plane), `ProcessRmsCanvasEvent()` (click in a middle pad populates the bottom FFT pad for that plane and jumps the main waveform). |
+| `viewer/RmsAnalyzer.{h,cc}` | Stateless noise analysis helper. `AnalyzePlane(h)` — percentile-based RMS (WCT CalcRMSWithFlags + SignalFilter algorithm). `AnalyzePlaneWithFft(h, name, outFft)` — same RMS pipeline plus per-channel FFT: signal regions clamped to ±4σ (baseline-subtracted) rather than flagged, then `TVirtualFFT` R2C (one instance reused across channels), magnitude stored into a `TH2F` (channel × frequency in MHz, DC bin zeroed). `Save/Load` overloads write/read RMS TTrees + FFT TH2Fs in a single cache file (`<file>.rms.root`); Load gracefully handles pre-FFT caches by returning null FFT pointers. `AnalyzeFile()` is the batch entry point. |
 
 ### `scripts/`
 
 | File | Purpose |
 |------|---------|
-| `scripts/loadClasses.C` | ROOT macro that ACLiC-compiles all 8 `.cc` files in `event/` and `viewer/` in dependency order, and adds both directories to the include path. Must be loaded before `Magnify.C`. |
+| `scripts/loadClasses.C` | ROOT macro that ACLiC-compiles all source files in `event/` and `viewer/` in dependency order (including `RmsAnalyzer.cc`), and adds both directories to the include path. Must be loaded before `Magnify.C`. |
 | `scripts/Magnify.C` | Entry-point macro. Defines `Magnify(filename, threshold, frame, rebin)` which instantiates `GuiController` with a 1600 × 900 window. Default arguments: `threshold=600`, `frame="decon"`, `rebin=4`. |
 | `scripts/preprocess.C` | Defines `preprocess(inPath, outDir, intag, outtag, suffix, set_baseline, file_open_mode, xmin, xmax, ymin, ymax)`. Iterates all TH2 keys in the input file whose name contains `intag` (e.g. `"hu_orig"` matches `hu_orig0`, `hu_orig1`, …), and fills a single whole-detector TH2 (`hall`) at the correct (X, Y) bin for each matched per-APA histogram. Separately handles tree merging (`tree:T_badN` → `T_bad`) and 1-D threshold histograms (`Merge1DByTag`). |
+| `scripts/run_rms_analysis.C` | Headless batch macro. Calls `loadClasses.C` then `RmsAnalyzer::AnalyzeFile(inFile)` to compute per-channel RMS and FFT for one Magnify file. Output: `<inFile>.rms.root`. |
+| `scripts/run_rms_analysis.sh` | Shell wrapper around `run_rms_analysis.C`. Accepts one or more Magnify ROOT files and processes them in sequence. |
 
 ### `test_feature/`
 
@@ -186,6 +192,8 @@ If no filename is given, a file-open dialog appears.
 | "raw waveform" toggle | Overlays raw-ADC (blue) on the 1-D waveform pads |
 | "bad channel" toggle | Overlays gray lines on TH2 pads and dashed boxes on 1-D pads |
 | "evil mode" toggle | When navigating channels, skips to next bad channel |
+| **Region Sum** button | Opens the trapezoidal region-sum tool (see `docs/REGION_SUM.md`) |
+| **RMS Analysis** button | Opens the RMS/FFT noise analysis panel (see `docs/RMS_FFT.md`) |
 | Color range entries | Sets z-axis (color scale) min/max on all 6 TH2 pads |
 | x/y range entries | Clips the 1-D waveform axis |
 | UnZoom button | Resets all 6 TH2 pad axes to full range |

@@ -34,6 +34,8 @@
 #include "TGTextEntry.h"
 #include "TRootEmbeddedCanvas.h"
 #include "TGClient.h"
+#include "TPad.h"
+#include "TH1D.h"
 
 #include <iostream>
 #include <vector>
@@ -71,6 +73,13 @@ GuiController::GuiController(const TGWindow *p, int w, int h, const char* fn, do
     rmsOverlayCheck = nullptr;
     rmsDistCanvas  = nullptr;
     rmsLoaded      = false;
+    rmsTopPad      = nullptr;
+    for (int p = 0; p < 3; ++p) {
+        fftSpec[p]       = nullptr;
+        fftSelectedCh[p] = -1;
+        rmsMidPad[p]     = nullptr;
+        rmsBotPad[p]     = nullptr;
+    }
     mw->SetWindowName(TString::Format("Magnify: run %i, sub-run %i, event %i, anode %i",
         data->runNo, data->subRunNo, data->eventNo, data->anodeNo));
 
@@ -932,7 +941,10 @@ void GuiController::HideRmsWindow()
 
 void GuiController::ComputeRms()
 {
-    printf("RMS Analysis: computing ...\n");
+    printf("RMS Analysis: computing (with FFT) ...\n");
+    static const char* fftKey[3] = {"fft_u", "fft_v", "fft_w"};
+    TH2F* newFft[3] = {nullptr, nullptr, nullptr};
+
     for (int p = 0; p < 3; ++p) {
         TH2F* h = data->wfs.at(p)->hOrig;
         if (!h) {
@@ -942,12 +954,20 @@ void GuiController::ComputeRms()
         }
         printf("  plane %d (%s): %d channels x %d ticks\n",
             p, h->GetName(), h->GetNbinsX(), h->GetNbinsY());
-        rmsResults[p] = RmsAnalyzer::AnalyzePlane(h);
+        rmsResults[p] = RmsAnalyzer::AnalyzePlaneWithFft(h, fftKey[p], newFft[p]);
         gSystem->ProcessEvents();
     }
 
+    // Replace stored FFT spectra
+    for (int p = 0; p < 3; ++p) {
+        delete fftSpec[p];
+        fftSpec[p] = newFft[p];
+        fftSelectedCh[p] = -1;
+    }
+
     TString cacheFile = RmsAnalyzer::CacheFilename(data->rootFile->GetName());
-    RmsAnalyzer::Save(rmsResults[0], rmsResults[1], rmsResults[2], cacheFile.Data());
+    RmsAnalyzer::Save(rmsResults[0], rmsResults[1], rmsResults[2],
+                      fftSpec[0], fftSpec[1], fftSpec[2], cacheFile.Data());
     rmsLoaded = true;
 
     if (rmsStatusLabel)
@@ -961,7 +981,10 @@ void GuiController::ComputeRms()
 void GuiController::LoadRmsFromFile()
 {
     TString cacheFile = RmsAnalyzer::CacheFilename(data->rootFile->GetName());
-    if (!RmsAnalyzer::Load(cacheFile.Data(), rmsResults[0], rmsResults[1], rmsResults[2])) {
+    TH2F* newFft[3] = {nullptr, nullptr, nullptr};
+    if (!RmsAnalyzer::Load(cacheFile.Data(),
+                           rmsResults[0], rmsResults[1], rmsResults[2],
+                           newFft[0], newFft[1], newFft[2])) {
         printf("RMS Analysis: failed to load %s\n", cacheFile.Data());
         rmsLoaded = false;
         if (rmsStatusLabel)
@@ -969,13 +992,22 @@ void GuiController::LoadRmsFromFile()
                 TString::Format("%s  [LOAD FAILED]", cacheFile.Data()).Data()
             );
     } else {
+        // Replace stored FFT spectra (may be nullptr for pre-FFT cache files)
+        for (int p = 0; p < 3; ++p) {
+            delete fftSpec[p];
+            fftSpec[p] = newFft[p];
+            fftSelectedCh[p] = -1;
+        }
         rmsLoaded = true;
-        printf("RMS Analysis: loaded %s  (U:%zu V:%zu W:%zu channels)\n",
+        bool hasFft = (fftSpec[0] || fftSpec[1] || fftSpec[2]);
+        printf("RMS Analysis: loaded %s  (U:%zu V:%zu W:%zu channels)%s\n",
             cacheFile.Data(),
-            rmsResults[0].size(), rmsResults[1].size(), rmsResults[2].size());
+            rmsResults[0].size(), rmsResults[1].size(), rmsResults[2].size(),
+            hasFft ? "  [FFT OK]" : "  [no FFT]");
         if (rmsStatusLabel)
             rmsStatusLabel->SetText(
-                TString::Format("%s  [LOADED]", cacheFile.Data()).Data()
+                TString::Format("%s  [LOADED%s]", cacheFile.Data(),
+                    hasFft ? "+FFT" : "").Data()
             );
     }
     if (rmsWindow) rmsWindow->Layout();
@@ -988,51 +1020,72 @@ void GuiController::ShowRmsDistribution()
         return;
     }
 
-    // Create or raise the distribution canvas
+    static const char* planeLetter[3] = {"U", "V", "W"};
+    static const Color_t planeColor[3] = {kRed, kBlue, kGreen + 2};
+
     TString canvName = "rmsDistCanvas";
     if (!rmsDistCanvas || !gROOT->FindObject(canvName)) {
-        rmsDistCanvas = new TCanvas(canvName, "RMS Noise Distribution", 900, 700);
+        rmsDistCanvas = new TCanvas(canvName, "RMS Noise Distribution", 1100, 900);
         rmsDistCanvas->Connect(
             "ProcessedEvent(Int_t,Int_t,Int_t,TObject*)",
             "GuiController", this,
             "ProcessRmsCanvasEvent(Int_t,Int_t,Int_t,TObject*)"
         );
     } else {
-        rmsDistCanvas->cd();
-        rmsDistCanvas->Clear();
         rmsDistCanvas->RaiseWindow();
     }
 
-    rmsDistCanvas->Divide(2, 2);
+    // Clear canvas and null the pad pointers (Clear() deletes child pads)
+    rmsDistCanvas->cd();
+    rmsDistCanvas->Clear();
+    rmsTopPad = nullptr;
+    for (int p = 0; p < 3; ++p) { rmsMidPad[p] = nullptr; rmsBotPad[p] = nullptr; }
 
-    static const char* planeLetter[3] = {"U", "V", "W"};
-    static const Color_t planeColor[3] = {kRed, kBlue, kGreen + 2};
+    // ---- 7-pad manual layout ----
+    // Top: full-width RMS distribution histogram  [y 0.67..1.00]
+    // Mid: three side-by-side RMS-vs-channel      [y 0.34..0.67]
+    // Bot: three side-by-side FFT spectra         [y 0.00..0.34]
+    rmsDistCanvas->cd();
+    rmsTopPad = new TPad("rms_top", "", 0.00, 0.67, 1.00, 1.00);
+    rmsTopPad->SetBottomMargin(0.12); rmsTopPad->SetTopMargin(0.10);
+    rmsTopPad->Draw();
 
-    // Find global RMS range for the distribution histogram
+    for (int p = 0; p < 3; ++p) {
+        double x1 = p / 3.0, x2 = (p + 1) / 3.0;
+
+        rmsMidPad[p] = new TPad(TString::Format("rms_mid_%c", "uvw"[p]), "",
+                                x1, 0.34, x2, 0.67);
+        rmsMidPad[p]->SetBottomMargin(0.12); rmsMidPad[p]->SetTopMargin(0.10);
+        if (p > 0) rmsMidPad[p]->SetLeftMargin(0.12);
+        rmsMidPad[p]->Draw();
+
+        rmsBotPad[p] = new TPad(TString::Format("rms_bot_%c", "uvw"[p]), "",
+                                x1, 0.00, x2, 0.34);
+        rmsBotPad[p]->SetBottomMargin(0.14); rmsBotPad[p]->SetTopMargin(0.10);
+        if (p > 0) rmsBotPad[p]->SetLeftMargin(0.12);
+        rmsBotPad[p]->Draw();
+    }
+
+    // ---- Top pad: RMS distribution histogram (U/V/W overlaid) ----
     float maxRms = 0.f;
     for (int p = 0; p < 3; ++p)
         for (const auto& r : rmsResults[p])
             if (r.rms_final > maxRms) maxRms = r.rms_final;
     if (maxRms <= 0.f) maxRms = 10.f;
-    int nBins = 100;
     float rmsHi = maxRms * 1.2f;
 
-    // Pad 1: overlay 1D distribution of final RMS for U/V/W
-    rmsDistCanvas->cd(1);
+    rmsTopPad->cd();
     TH1F* hDist[3] = {};
     for (int p = 0; p < 3; ++p) {
         TString hname = TString::Format("hRmsDist_%s", planeLetter[p]);
-        TH1F* hOld = (TH1F*)gDirectory->FindObject(hname);
+        TH1F* hOld = (TH1F*)gROOT->FindObject(hname);
         if (hOld) delete hOld;
-        hDist[p] = new TH1F(hname,
-            TString::Format("%s plane; RMS (ADC); Channels", planeLetter[p]),
-            nBins, 0, rmsHi);
+        hDist[p] = new TH1F(hname, "", 100, 0, rmsHi);
         for (const auto& r : rmsResults[p])
             hDist[p]->Fill(r.rms_final);
         hDist[p]->SetLineColor(planeColor[p]);
         hDist[p]->SetLineWidth(2);
     }
-    // Find y-max across planes for a shared range
     float yMax = 0.f;
     for (int p = 0; p < 3; ++p)
         if (hDist[p]->GetMaximum() > yMax) yMax = hDist[p]->GetMaximum();
@@ -1041,31 +1094,53 @@ void GuiController::ShowRmsDistribution()
         hDist[p]->SetTitle("Per-channel noise RMS; RMS (ADC); Channels");
         hDist[p]->Draw(p == 0 ? "hist" : "hist same");
     }
-    TLegend* leg = new TLegend(0.65, 0.7, 0.92, 0.92);
+    TLegend* leg = new TLegend(0.75, 0.65, 0.97, 0.92);
     for (int p = 0; p < 3; ++p)
         leg->AddEntry(hDist[p], TString::Format("%s  (n=%d)", planeLetter[p],
             (int)rmsResults[p].size()), "l");
     leg->Draw();
-    gPad->SetGridx(); gPad->SetGridy();
+    rmsTopPad->SetGridx(); rmsTopPad->SetGridy();
 
-    // Pads 2/3/4: RMS vs channel for U/V/W
+    // ---- Middle pads: RMS vs channel ----
     for (int p = 0; p < 3; ++p) {
-        rmsDistCanvas->cd(p + 2);
+        rmsMidPad[p]->cd();
         const auto& res = rmsResults[p];
         int n = (int)res.size();
         TGraph* gr = new TGraph(n);
         for (int i = 0; i < n; ++i)
             gr->SetPoint(i, res[i].channel, res[i].rms_final);
-
-        TString grTitle = TString::Format(
-            "%s plane RMS vs channel; Channel; RMS (ADC)", planeLetter[p]);
-        gr->SetTitle(grTitle);
+        gr->SetTitle(TString::Format(
+            "%s plane RMS vs channel; Channel; RMS (ADC)", planeLetter[p]));
         gr->SetMarkerStyle(20);
         gr->SetMarkerSize(0.5);
         gr->SetMarkerColor(planeColor[p]);
         gr->SetLineColor(planeColor[p]);
         gr->Draw("AP");
-        gPad->SetGridx(); gPad->SetGridy();
+        rmsMidPad[p]->SetGridx(); rmsMidPad[p]->SetGridy();
+    }
+
+    // ---- Bottom pads: FFT spectra (initially empty frames) ----
+    for (int p = 0; p < 3; ++p) {
+        rmsBotPad[p]->cd();
+        TString frameName = TString::Format(fftSpec[p] ? "hFftFrame_%c" : "hFftNoData_%c",
+                                            "UVW"[p]);
+        TH1F* hOld2 = (TH1F*)gROOT->FindObject(frameName);
+        if (hOld2) delete hOld2;
+        if (fftSpec[p]) {
+            TH1F* hFrame = new TH1F(frameName,
+                TString::Format("%s plane FFT (click channel above); freq (MHz); |F| (ADC)",
+                    planeLetter[p]),
+                10, 0, RmsAnalyzer::kNyquistMHz);
+            hFrame->SetMinimum(0);
+            hFrame->Draw("axis");
+        } else {
+            TH1F* hFrame = new TH1F(frameName,
+                TString::Format("%s plane — no FFT in cache; freq (MHz); |F| (ADC)",
+                    planeLetter[p]),
+                10, 0, RmsAnalyzer::kNyquistMHz);
+            hFrame->Draw("axis");
+        }
+        rmsBotPad[p]->SetGridx(); rmsBotPad[p]->SetGridy();
     }
 
     rmsDistCanvas->Update();
@@ -1073,19 +1148,58 @@ void GuiController::ShowRmsDistribution()
 
 void GuiController::ProcessRmsCanvasEvent(Int_t ev, Int_t x, Int_t y, TObject* selected)
 {
-    if (ev != 11) return;  // only left-click
+    (void)selected;
+    if (ev != 11) return;
     if (!rmsDistCanvas) return;
 
     TVirtualPad* pad = rmsDistCanvas->GetClickSelectedPad();
     if (!pad) return;
-    int padNo = pad->GetNumber();
-    // Pads 2/3/4 are the per-plane RMS-vs-channel graphs (U/V/W)
-    if (padNo < 2 || padNo > 4) return;
+
+    // Only act on clicks in the middle (RMS-vs-channel) pads
+    const char* padName = pad->GetName();
+    int plane = -1;
+    if (strcmp(padName, "rms_mid_u") == 0) plane = 0;
+    else if (strcmp(padName, "rms_mid_v") == 0) plane = 1;
+    else if (strcmp(padName, "rms_mid_w") == 0) plane = 2;
+    if (plane < 0) return;
 
     double xx = pad->AbsPixeltoX(x);
     int chanNo = TMath::Nint(xx);
-    cout << "RMS canvas click: pad " << padNo << "  channel=" << chanNo << endl;
+    cout << "RMS canvas click: " << padName << "  channel=" << chanNo << endl;
 
+    fftSelectedCh[plane] = chanNo;
+
+    // Update the corresponding bottom FFT pad
+    if (fftSpec[plane] && rmsBotPad[plane]) {
+        static const char* planeLetter[3] = {"U", "V", "W"};
+        static const Color_t planeColor[3] = {kRed, kBlue, kGreen + 2};
+
+        int binX = fftSpec[plane]->GetXaxis()->FindBin((double)chanNo);
+        TString sliceName = TString::Format("hFftSlice_%c", "UVW"[plane]);
+
+        // Remove any previous slice from gROOT's object table
+        TObject* hOld = gROOT->FindObject(sliceName);
+        if (hOld) delete hOld;
+
+        TH1D* hSlice = fftSpec[plane]->ProjectionY(sliceName, binX, binX);
+        hSlice->SetTitle(TString::Format(
+            "%s plane FFT ch %d; freq (MHz); |F| (ADC)",
+            planeLetter[plane], chanNo));
+        hSlice->SetLineColor(planeColor[plane]);
+        hSlice->SetLineWidth(2);
+
+        rmsBotPad[plane]->cd();
+        rmsBotPad[plane]->Clear();
+        hSlice->SetMinimum(0);
+        hSlice->Draw("hist");
+        rmsBotPad[plane]->SetGridx(); rmsBotPad[plane]->SetGridy();
+        rmsBotPad[plane]->Modified();
+        rmsBotPad[plane]->Update();
+        rmsDistCanvas->Modified();
+        rmsDistCanvas->Update();
+    }
+
+    // Also jump the main waveform display to this channel
     cw->channelEntry->SetNumber(chanNo);
     ChannelChanged();
 }
