@@ -35,6 +35,7 @@ Data::Data(const char* filename, double threshold, const char* frame, int rebin)
 
     // load_runinfo first so anodeNo is available for all histogram name lookups
     load_runinfo();
+    load_geometry();
 
     // suffix is the anode number when present (e.g. "7"), otherwise empty string
     TString suf = (anodeNo >= 0) ? Form("%d", anodeNo) : "";
@@ -116,6 +117,26 @@ void Data::load_runinfo()
         subRunNo = 0;
         eventNo = 0;
     }
+}
+
+void Data::load_geometry() {
+    TString suf = (anodeNo >= 0) ? Form("%d", anodeNo) : "";
+    TTree* t = (TTree*)rootFile->Get("T_geo" + suf);
+    if (!t) {
+        cout << "T_geo" << suf << " not found; wire-length plot disabled" << endl;
+        return;
+    }
+    int    chid   = 0;
+    double length = 0.;
+    t->SetBranchAddress("chid",   &chid);
+    t->SetBranchAddress("length", &length);
+    Long64_t n = t->GetEntries();
+    for (Long64_t i = 0; i < n; ++i) {
+        t->GetEntry(i);
+        wire_length[chid] = length;
+    }
+    cout << "Loaded " << (int)wire_length.size()
+         << " wire lengths from T_geo" << suf << endl;
 }
 
 void Data::load_channelstatus(){

@@ -37,6 +37,7 @@ public:
     double decon_scaling;     // scaling applied to h*_threshold for decon wfs
 
     std::map<int, std::string> channel_status;
+    std::map<int, double>      wire_length;    // chid -> length (cm); empty if T_geo absent
 
     int GetPlaneNo(int chanNo);
 
@@ -48,6 +49,7 @@ private:
     // void load_badchannels();
     void load_runinfo();
     void load_channelstatus();
+    void load_geometry();
 };
 
 #endif

@@ -73,7 +73,9 @@ GuiController::GuiController(const TGWindow *p, int w, int h, const char* fn, do
     rmsOverlayCheck = nullptr;
     rmsDistCanvas  = nullptr;
     rmsLoaded      = false;
-    rmsTopPad      = nullptr;
+    rmsTopDistPad  = nullptr;
+    rmsTopUvPad    = nullptr;
+    rmsTopWPad     = nullptr;
     for (int p = 0; p < 3; ++p) {
         fftSpec[p]       = nullptr;
         fftSelectedCh[p] = -1;
@@ -1038,17 +1040,25 @@ void GuiController::ShowRmsDistribution()
     // Clear canvas and null the pad pointers (Clear() deletes child pads)
     rmsDistCanvas->cd();
     rmsDistCanvas->Clear();
-    rmsTopPad = nullptr;
+    rmsTopDistPad = nullptr; rmsTopUvPad = nullptr; rmsTopWPad = nullptr;
     for (int p = 0; p < 3; ++p) { rmsMidPad[p] = nullptr; rmsBotPad[p] = nullptr; }
 
-    // ---- 7-pad manual layout ----
-    // Top: full-width RMS distribution histogram  [y 0.67..1.00]
+    // ---- 9-pad manual layout ----
+    // Top row: three thirds — RMS dist | RMS-vs-length U+V | RMS-vs-length W  [y 0.67..1.00]
     // Mid: three side-by-side RMS-vs-channel      [y 0.34..0.67]
     // Bot: three side-by-side FFT spectra         [y 0.00..0.34]
     rmsDistCanvas->cd();
-    rmsTopPad = new TPad("rms_top", "", 0.00, 0.67, 1.00, 1.00);
-    rmsTopPad->SetBottomMargin(0.12); rmsTopPad->SetTopMargin(0.10);
-    rmsTopPad->Draw();
+    rmsTopDistPad = new TPad("rms_top_dist", "", 0.000, 0.67, 0.333, 1.00);
+    rmsTopDistPad->SetBottomMargin(0.12); rmsTopDistPad->SetTopMargin(0.10);
+    rmsTopDistPad->Draw();
+    rmsTopUvPad = new TPad("rms_top_uv", "", 0.333, 0.67, 0.667, 1.00);
+    rmsTopUvPad->SetBottomMargin(0.12); rmsTopUvPad->SetTopMargin(0.10);
+    rmsTopUvPad->SetLeftMargin(0.12);
+    rmsTopUvPad->Draw();
+    rmsTopWPad = new TPad("rms_top_w", "", 0.667, 0.67, 1.000, 1.00);
+    rmsTopWPad->SetBottomMargin(0.12); rmsTopWPad->SetTopMargin(0.10);
+    rmsTopWPad->SetLeftMargin(0.12);
+    rmsTopWPad->Draw();
 
     for (int p = 0; p < 3; ++p) {
         double x1 = p / 3.0, x2 = (p + 1) / 3.0;
@@ -1066,7 +1076,7 @@ void GuiController::ShowRmsDistribution()
         rmsBotPad[p]->Draw();
     }
 
-    // ---- Top pad: RMS distribution histogram (U/V/W overlaid) ----
+    // ---- Top-left pad: RMS distribution histogram (U/V/W overlaid) ----
     float maxRms = 0.f;
     for (int p = 0; p < 3; ++p)
         for (const auto& r : rmsResults[p])
@@ -1074,7 +1084,7 @@ void GuiController::ShowRmsDistribution()
     if (maxRms <= 0.f) maxRms = 10.f;
     float rmsHi = maxRms * 1.2f;
 
-    rmsTopPad->cd();
+    rmsTopDistPad->cd();
     TH1F* hDist[3] = {};
     for (int p = 0; p < 3; ++p) {
         TString hname = TString::Format("hRmsDist_%s", planeLetter[p]);
@@ -1094,12 +1104,65 @@ void GuiController::ShowRmsDistribution()
         hDist[p]->SetTitle("Per-channel noise RMS; RMS (ADC); Channels");
         hDist[p]->Draw(p == 0 ? "hist" : "hist same");
     }
-    TLegend* leg = new TLegend(0.75, 0.65, 0.97, 0.92);
+    TLegend* leg = new TLegend(0.65, 0.70, 0.97, 0.92);
     for (int p = 0; p < 3; ++p)
         leg->AddEntry(hDist[p], TString::Format("%s  (n=%d)", planeLetter[p],
             (int)rmsResults[p].size()), "l");
     leg->Draw();
-    rmsTopPad->SetGridx(); rmsTopPad->SetGridy();
+    rmsTopDistPad->SetGridx(); rmsTopDistPad->SetGridy();
+
+    // ---- Top-middle pad: RMS vs wire length (U + V overlaid) ----
+    // ---- Top-right  pad: RMS vs wire length (W) ----
+    auto buildLenGraph = [&](int plane, int color, const char* name) -> TGraph* {
+        if (auto old = (TGraph*)gROOT->FindObject(name)) delete old;
+        TGraph* g = new TGraph();
+        g->SetName(name);
+        int k = 0;
+        for (const auto& r : rmsResults[plane]) {
+            auto it = data->wire_length.find(r.channel);
+            if (it == data->wire_length.end()) continue;
+            g->SetPoint(k++, it->second, r.rms_final);
+        }
+        g->SetMarkerStyle(20);
+        g->SetMarkerSize(0.4);
+        g->SetMarkerColor(color);
+        return g;
+    };
+
+    rmsTopUvPad->cd();
+    TGraph* gU = buildLenGraph(0, kRed,  "gRmsLenU");
+    TGraph* gV = buildLenGraph(1, kBlue, "gRmsLenV");
+    TGraph* gFirstUV = (gU->GetN() > 0) ? gU : (gV->GetN() > 0 ? gV : nullptr);
+    if (gFirstUV) {
+        gFirstUV->SetTitle("RMS vs wire length (U,V); Wire length (cm); RMS (ADC)");
+        gFirstUV->Draw("AP");
+        if (gFirstUV == gU && gV->GetN() > 0) gV->Draw("P SAME");
+        TLegend* legUV = new TLegend(0.75, 0.78, 0.97, 0.92);
+        legUV->AddEntry(gU, "U", "p");
+        legUV->AddEntry(gV, "V", "p");
+        legUV->Draw();
+    } else {
+        if (auto old = gROOT->FindObject("hLenUVNoData")) delete old;
+        TH1F* fr = new TH1F("hLenUVNoData",
+            "RMS vs wire length (U,V) — T_geo not loaded; Wire length (cm); RMS (ADC)",
+            10, 0, 1);
+        fr->SetMinimum(0); fr->SetMaximum(1); fr->Draw("axis");
+    }
+    rmsTopUvPad->SetGridx(); rmsTopUvPad->SetGridy();
+
+    rmsTopWPad->cd();
+    TGraph* gW = buildLenGraph(2, kGreen+2, "gRmsLenW");
+    if (gW->GetN() > 0) {
+        gW->SetTitle("RMS vs wire length (W); Wire length (cm); RMS (ADC)");
+        gW->Draw("AP");
+    } else {
+        if (auto old = gROOT->FindObject("hLenWNoData")) delete old;
+        TH1F* fr = new TH1F("hLenWNoData",
+            "RMS vs wire length (W) — T_geo not loaded; Wire length (cm); RMS (ADC)",
+            10, 0, 1);
+        fr->SetMinimum(0); fr->SetMaximum(1); fr->Draw("axis");
+    }
+    rmsTopWPad->SetGridx(); rmsTopWPad->SetGridy();
 
     // ---- Middle pads: RMS vs channel ----
     for (int p = 0; p < 3; ++p) {

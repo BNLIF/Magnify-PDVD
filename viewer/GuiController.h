@@ -112,7 +112,9 @@ private:
     int    fftSelectedCh[3];  // last-clicked channel per plane (-1 = none)
 
     // Named pads inside rmsDistCanvas (owned by the canvas, not us)
-    TPad*  rmsTopPad;
+    TPad*  rmsTopDistPad;   // per-channel RMS distribution histogram
+    TPad*  rmsTopUvPad;     // RMS vs wire length, U+V overlaid
+    TPad*  rmsTopWPad;      // RMS vs wire length, W only
     TPad*  rmsMidPad[3];
     TPad*  rmsBotPad[3];
 };
