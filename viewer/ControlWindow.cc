@@ -6,16 +6,25 @@
 #include "TGListBox.h"
 #include "TGLabel.h"
 #include "TGDoubleSlider.h"
+#include "TGComboBox.h"
 
 #include <iostream>
 using namespace std;
 
 ControlWindow::ControlWindow(const TGWindow *p, int w, int h)
-    :TGHorizontalFrame(p, w, h)
+    :TGVerticalFrame(p, w, h)
 {
-    TGGroupFrame *group_general = new TGGroupFrame(this, "General", kHorizontalFrame);
+    TGHorizontalFrame *row1 = new TGHorizontalFrame(this, w, h/2);
+    AddFrame(row1, new TGLayoutHints(kLHintsTop | kLHintsExpandX, 0, 0, 0, 0));
+
+    TGHorizontalFrame *row2 = new TGHorizontalFrame(this, w, h/2);
+    AddFrame(row2, new TGLayoutHints(kLHintsTop | kLHintsExpandX, 0, 0, 0, 0));
+
+    // ---- Row 1: General + U/V/W plane threshold groups ----
+
+    TGGroupFrame *group_general = new TGGroupFrame(row1, "General", kHorizontalFrame);
     group_general->SetTitlePos(TGGroupFrame::kLeft);
-    AddFrame(group_general, new TGLayoutHints(kLHintsTop | kLHintsLeft, 2, 2, 1, 1));
+    row1->AddFrame(group_general, new TGLayoutHints(kLHintsTop | kLHintsLeft, 2, 2, 1, 1));
 
     group_general->AddFrame(new TGLabel(group_general, "channel: "), new TGLayoutHints(kLHintsTop | kLHintsLeft,  2, 2, 1, 1));
     channelEntry = new TGNumberEntry(group_general, 0, 5, -1,
@@ -67,9 +76,9 @@ ControlWindow::ControlWindow(const TGWindow *p, int w, int h)
 
     TGGroupFrame *group[3];
     for (int i=0; i<3; i++) {
-        group[i] = new TGGroupFrame(this, "", kHorizontalFrame);
+        group[i] = new TGGroupFrame(row1, "", kHorizontalFrame);
         group[i]->SetTitlePos(TGGroupFrame::kLeft);
-        AddFrame(group[i], new TGLayoutHints(kLHintsTop | kLHintsLeft, 2, 2, 1, 1));
+        row1->AddFrame(group[i], new TGLayoutHints(kLHintsTop | kLHintsLeft, 2, 2, 1, 1));
 
         group[i]->AddFrame(new TGLabel(group[i], "threshold: "), new TGLayoutHints(kLHintsTop | kLHintsLeft,  2, 2, 1, 1));
         threshEntry[i] = new TGNumberEntry(group[i], 500, 7, -1,
@@ -83,9 +92,31 @@ ControlWindow::ControlWindow(const TGWindow *p, int w, int h)
     group[1]->SetTitle("V Plane");
     group[2]->SetTitle("W Plane");
 
-    TGGroupFrame *group_misc = new TGGroupFrame(this, "Range", kHorizontalFrame);
+    // ---- Row 2: Navigation + Range groups ----
+
+    TGGroupFrame *group_nav = new TGGroupFrame(row2, "Navigation", kHorizontalFrame);
+    group_nav->SetTitlePos(TGGroupFrame::kLeft);
+    row2->AddFrame(group_nav, new TGLayoutHints(kLHintsTop | kLHintsLeft, 2, 2, 1, 1));
+
+    group_nav->AddFrame(new TGLabel(group_nav, "anode: "), new TGLayoutHints(kLHintsTop | kLHintsLeft, 2, 2, 4, 1));
+    anodeCombo = new TGComboBox(group_nav, 100);
+    anodeCombo->Resize(80, 22);
+    group_nav->AddFrame(anodeCombo, new TGLayoutHints(kLHintsTop | kLHintsLeft, 1, 4, 3, 1));
+
+    group_nav->AddFrame(new TGLabel(group_nav, "event: "), new TGLayoutHints(kLHintsTop | kLHintsLeft, 2, 2, 4, 1));
+    eventCombo = new TGComboBox(group_nav, 101);
+    eventCombo->Resize(120, 22);
+    group_nav->AddFrame(eventCombo, new TGLayoutHints(kLHintsTop | kLHintsLeft, 1, 4, 3, 1));
+
+    prevEvtButton = new TGTextButton(group_nav, "  <  ");
+    group_nav->AddFrame(prevEvtButton, new TGLayoutHints(kLHintsTop | kLHintsLeft, 3, 2, 2, 2));
+
+    nextEvtButton = new TGTextButton(group_nav, "  >  ");
+    group_nav->AddFrame(nextEvtButton, new TGLayoutHints(kLHintsTop | kLHintsLeft, 2, 3, 2, 2));
+
+    TGGroupFrame *group_misc = new TGGroupFrame(row2, "Range", kHorizontalFrame);
     group_misc->SetTitlePos(TGGroupFrame::kLeft);
-    AddFrame(group_misc, new TGLayoutHints(kLHintsTop | kLHintsLeft, 2, 2, 1, 1));
+    row2->AddFrame(group_misc, new TGLayoutHints(kLHintsTop | kLHintsLeft, 2, 2, 1, 1));
 
     group_misc->AddFrame(new TGLabel(group_misc, "x range: "), new TGLayoutHints(kLHintsTop | kLHintsLeft,  2, 2, 1, 1));
     for (int i=0; i<2; i++) {

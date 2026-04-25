@@ -47,6 +47,7 @@ Waveforms::Waveforms(TH2F *h, BadChannels* v, TString name, TString title, doubl
         DUMMY_NBINS, hOrig->GetXaxis()->GetBinLowEdge(0), hOrig->GetXaxis()->GetBinUpEdge(nChannels),
         DUMMY_NBINS, hOrig->GetYaxis()->GetBinLowEdge(0), hOrig->GetYaxis()->GetBinUpEdge(nTDCs)
     );
+    hDummy->SetDirectory(0);  // we own this; don't let ROOT auto-delete on file close
     hDummy->SetXTitle("channel");
     hDummy->SetYTitle("ticks");
 
@@ -80,6 +81,9 @@ Waveforms::Waveforms(TH2F *h, BadChannels* v, TString name, TString title, doubl
 Waveforms::~Waveforms()
 {
     Clear();
+    delete hDummy;
+    for (auto* l : lines)     delete l;
+    for (auto* l : apa_lines) delete l;
 }
 
 void Waveforms::Clear()

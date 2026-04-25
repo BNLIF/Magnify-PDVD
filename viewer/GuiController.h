@@ -6,6 +6,8 @@
 #include "TString.h"
 #include "RmsAnalyzer.h"
 
+#include <vector>
+
 class MainWindow;
 class ViewWindow;
 class ControlWindow;
@@ -75,6 +77,12 @@ public:
     void ToggleRmsOverlay();
     void ProcessRmsCanvasEvent(Int_t ev, Int_t x, Int_t y, TObject* selected);
 
+    void OnAnodeChanged(Int_t id);
+    void OnEventChanged(Int_t id);
+    void PrevEvent();
+    void NextEvent();
+    void ReloadFile();
+
     TString OpenDialog();
 
     MainWindow *mw;
@@ -110,6 +118,17 @@ private:
     // FFT spectra: TH2F(channel × freq-MHz), one per plane; nullptr if not loaded
     TH2F*  fftSpec[3];
     int    fftSelectedCh[3];  // last-clicked channel per plane (-1 = none)
+
+    // Navigation state
+    TString              inputDataDir;
+    std::vector<TString> eventTags;
+    std::vector<int>     evtRuns;
+    std::vector<int>     evtNums;
+    int                  curEvtIdx;
+    int                  curAnode;
+    double               initThreshold;
+    TString              initFrame;
+    int                  initRebin;
 
     // Named pads inside rmsDistCanvas (owned by the canvas, not us)
     TPad*  rmsTopDistPad;   // per-channel RMS distribution histogram

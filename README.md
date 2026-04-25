@@ -45,6 +45,21 @@ cd scripts/
 root -l loadClasses.C Magnify.C
 ```
 
+### Event / Anode Navigation
+
+The control window has a second row with a **Navigation** group for switching between events and anodes without restarting ROOT:
+
+| Widget | Action |
+| --- | --- |
+| `anode` combo | Switch to a different anode (0–7) of the current event |
+| `event` combo | Jump directly to any discovered event |
+| `<` button | Previous event (same anode) |
+| `>` button | Next event (same anode) |
+
+Events are auto-discovered at startup by scanning the parent directory of the opened file for subdirectories matching `<run>_<event>` (e.g. `039324_0`, `039324_10`) that contain at least one `magnify-run<run>-evt<event>-anode*.root` file. Directories with extra suffixes (e.g. `039324_1_sel1`) are skipped. The list is sorted by `(run, event)`.
+
+Switching tears down the active `Data`, opens the new file, and redraws all 9 pads in place; Region Sum / RMS Analysis sub-windows are hidden and their caches are reset.
+
 ### Per-Channel RMS Noise Analysis
 
 Computes per-channel noise RMS for one or more Magnify ROOT files in batch (no display).  Output is written alongside each input as `<file>.rms.root`.
