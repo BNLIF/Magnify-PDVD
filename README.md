@@ -89,6 +89,19 @@ Click **RMS Analysis** in the control window to open the RMS panel.  It supports
 
 Toggling the checkbox immediately loads the cache for the selected mode (status shows `[not found]` if the cache does not yet exist — press **Compute RMS** to generate it).  The two modes use separate cache files so switching back and forth is instantaneous once both caches exist.  The number of time ticks adapts automatically to whichever source histogram is selected.
 
+#### RMS Noise Distribution window
+
+Click **Show distribution** to open the distribution window.  It contains a 9-pad canvas and a frequency range control bar at the top.
+
+**Channel-FFT sync:** the bottom row of the canvas shows the per-channel FFT spectrum (|F| vs. frequency in MHz).  The FFT pad updates automatically whenever the active channel changes — whether via the channel entry in the main control window, a click on a 2D wire view pad, or a click on the middle (RMS-vs-channel) pad inside the distribution window itself.
+
+**Frequency zoom:** use the **Freq min** / **max** entries at the top of the distribution window to restrict the X axis of all three FFT pads.  Type a value and press Enter to apply; the Y axis auto-scales to the peak within the visible frequency range.  The range persists across channel changes, so you can compare the same frequency band across many channels without resetting it.
+
+| Entry | Default | Effect |
+| --- | --- | --- |
+| Freq min | 0.00 MHz | Lower bound of the FFT X axis |
+| Freq max | 1.00 MHz | Upper bound of the FFT X axis (Nyquist) |
+
 ### (Experimental feature) Channel Scan
 ```
 ./channelscan.sh path/to/rootfile
