@@ -80,6 +80,11 @@ GuiController::GuiController(const TGWindow *p, int w, int h, const char* fn, do
     rmsDistCanvas   = nullptr;
     rmsFreqMin      = nullptr;
     rmsFreqMax      = nullptr;
+    rmsLineX1       = nullptr;
+    rmsLineY1       = nullptr;
+    rmsLineX2       = nullptr;
+    rmsLineY2       = nullptr;
+    rmsUvLine       = nullptr;
     rmsLoaded      = false;
     rmsTopDistPad  = nullptr;
     rmsTopUvPad    = nullptr;
@@ -1063,6 +1068,31 @@ void GuiController::HideRmsDistWindow()
     if (rmsDistWindow) rmsDistWindow->UnmapWindow();
 }
 
+void GuiController::DrawUvLine()
+{
+    if (!rmsTopUvPad) return;
+    if (!rmsLineX1 || !rmsLineY1 || !rmsLineX2 || !rmsLineY2) return;
+
+    double x1 = rmsLineX1->GetNumber();
+    double y1 = rmsLineY1->GetNumber();
+    double x2 = rmsLineX2->GetNumber();
+    double y2 = rmsLineY2->GetNumber();
+
+    rmsTopUvPad->cd();
+    if (rmsUvLine) {
+        delete rmsUvLine;
+        rmsUvLine = nullptr;
+    }
+    rmsUvLine = new TLine(x1, y1, x2, y2);
+    rmsUvLine->SetLineColor(kBlack);
+    rmsUvLine->SetLineWidth(2);
+    rmsUvLine->SetLineStyle(2);
+    rmsUvLine->Draw();
+    rmsTopUvPad->Modified();
+    rmsTopUvPad->Update();
+    if (rmsDistCanvas) { rmsDistCanvas->Modified(); rmsDistCanvas->Update(); }
+}
+
 void GuiController::ComputeRms()
 {
     bool useOrig = rmsUseOrigCheck && rmsUseOrigCheck->IsDown();
@@ -1181,6 +1211,37 @@ void GuiController::ShowRmsDistribution()
         freqRow->AddFrame(new TGLabel(freqRow, "MHz"),
             new TGLayoutHints(kLHintsLeft | kLHintsCenterY, 2, 2, 2, 2));
 
+        // Reference line row for the U/V RMS-vs-wire-length pad
+        TGHorizontalFrame* lineRow = new TGHorizontalFrame(rmsDistWindow);
+        rmsDistWindow->AddFrame(lineRow, new TGLayoutHints(kLHintsTop | kLHintsLeft, 8, 8, 2, 2));
+        lineRow->AddFrame(new TGLabel(lineRow, "Line: x1"),
+            new TGLayoutHints(kLHintsLeft | kLHintsCenterY, 2, 4, 2, 2));
+        rmsLineX1 = new TGNumberEntry(lineRow, 0.0, 7, -1,
+            TGNumberFormat::kNESRealTwo, TGNumberFormat::kNEAAnyNumber,
+            TGNumberFormat::kNELNoLimits);
+        lineRow->AddFrame(rmsLineX1, new TGLayoutHints(kLHintsLeft, 2, 6, 1, 1));
+        lineRow->AddFrame(new TGLabel(lineRow, "y1"),
+            new TGLayoutHints(kLHintsLeft | kLHintsCenterY, 2, 4, 2, 2));
+        rmsLineY1 = new TGNumberEntry(lineRow, 2.8, 6, -1,
+            TGNumberFormat::kNESRealTwo, TGNumberFormat::kNEAAnyNumber,
+            TGNumberFormat::kNELNoLimits);
+        lineRow->AddFrame(rmsLineY1, new TGLayoutHints(kLHintsLeft, 2, 10, 1, 1));
+        lineRow->AddFrame(new TGLabel(lineRow, "x2"),
+            new TGLayoutHints(kLHintsLeft | kLHintsCenterY, 2, 4, 2, 2));
+        rmsLineX2 = new TGNumberEntry(lineRow, 180.0, 7, -1,
+            TGNumberFormat::kNESRealTwo, TGNumberFormat::kNEAAnyNumber,
+            TGNumberFormat::kNELNoLimits);
+        lineRow->AddFrame(rmsLineX2, new TGLayoutHints(kLHintsLeft, 2, 6, 1, 1));
+        lineRow->AddFrame(new TGLabel(lineRow, "y2"),
+            new TGLayoutHints(kLHintsLeft | kLHintsCenterY, 2, 4, 2, 2));
+        rmsLineY2 = new TGNumberEntry(lineRow, 6.5, 6, -1,
+            TGNumberFormat::kNESRealTwo, TGNumberFormat::kNEAAnyNumber,
+            TGNumberFormat::kNELNoLimits);
+        lineRow->AddFrame(rmsLineY2, new TGLayoutHints(kLHintsLeft, 2, 10, 1, 1));
+        TGTextButton* drawLineBtn = new TGTextButton(lineRow, "Draw line");
+        drawLineBtn->Connect("Clicked()", "GuiController", this, "DrawUvLine()");
+        lineRow->AddFrame(drawLineBtn, new TGLayoutHints(kLHintsLeft | kLHintsCenterY, 4, 2, 1, 1));
+
         // Embedded canvas (takes most of the window)
         TRootEmbeddedCanvas* rmsDistEmbed = new TRootEmbeddedCanvas("rmsDistEmbed", rmsDistWindow, 1100, 900);
         rmsDistWindow->AddFrame(rmsDistEmbed,
@@ -1203,6 +1264,7 @@ void GuiController::ShowRmsDistribution()
     // Clear canvas and null the pad pointers (Clear() deletes child pads)
     rmsDistCanvas->cd();
     rmsDistCanvas->Clear();
+    rmsUvLine = nullptr;  // freed by Clear()
     rmsTopDistPad = nullptr; rmsTopUvPad = nullptr; rmsTopWPad = nullptr;
     for (int p = 0; p < 3; ++p) { rmsMidPad[p] = nullptr; rmsBotPad[p] = nullptr; }
 
@@ -1556,6 +1618,7 @@ void GuiController::ReloadFile()
         rmsBotPad[p] = nullptr;
     }
     rmsTopDistPad = nullptr; rmsTopUvPad = nullptr; rmsTopWPad = nullptr;
+    rmsUvLine = nullptr;
     rmsLoaded = false;
 
     for (int i = 1; i <= 9; ++i) {

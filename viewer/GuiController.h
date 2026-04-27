@@ -78,6 +78,7 @@ public:
     void ToggleRmsOverlay();
     void ToggleRmsUseOrig();
     void ApplyRmsFreqRange();
+    void DrawUvLine();
     void ProcessRmsCanvasEvent(Int_t ev, Int_t x, Int_t y, TObject* selected);
 
     void OnAnodeChanged(Int_t id);
@@ -119,6 +120,11 @@ private:
     TCanvas*              rmsDistCanvas;
     TGNumberEntry*        rmsFreqMin;
     TGNumberEntry*        rmsFreqMax;
+    TGNumberEntry*        rmsLineX1;
+    TGNumberEntry*        rmsLineY1;
+    TGNumberEntry*        rmsLineX2;
+    TGNumberEntry*        rmsLineY2;
+    TLine*                rmsUvLine;
     std::vector<ChannelRms> rmsResults[3];  // per-plane results (U=0,V=1,W=2)
     bool                  rmsLoaded;
 
