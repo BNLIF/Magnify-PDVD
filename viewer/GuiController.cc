@@ -39,6 +39,7 @@
 #include "TGClient.h"
 #include "TPad.h"
 #include "TH1D.h"
+#include "TCanvasImp.h"
 
 #include <iostream>
 #include <vector>
@@ -72,6 +73,7 @@ GuiController::GuiController(const TGWindow *p, int w, int h, const char* fn, do
         regTLowE[p]  = regTHighE[p]  = nullptr;
         for (int e = 0; e < 4; ++e) regionBoundary[p][e] = nullptr;
     }
+    resampCanvas    = nullptr;
     rmsWindow       = nullptr;
     rmsStatusLabel  = nullptr;
     rmsOverlayCheck = nullptr;
@@ -235,6 +237,12 @@ void GuiController::InitConnections()
 
     cw->regionSumBtn->Connect("Clicked()", "GuiController", this, "ShowRegionWindow()");
     cw->rmsBtn->Connect("Clicked()", "GuiController", this, "ShowRmsWindow()");
+    cw->resampCheckBtn->Connect("Clicked()", "GuiController", this, "ShowResampCheckWindow()");
+
+    cw->timeRangeEntry[0]->Connect("ValueSet(Long_t)", "GuiController", this, "RangeEntryChanged()");
+    cw->timeRangeEntry[1]->Connect("ValueSet(Long_t)", "GuiController", this, "RangeEntryChanged()");
+    cw->adcRangeEntry[0]->Connect("ValueSet(Long_t)", "GuiController", this, "RangeEntryChanged()");
+    cw->adcRangeEntry[1]->Connect("ValueSet(Long_t)", "GuiController", this, "RangeEntryChanged()");
 
     // stupid way to connect signal and slots
     vw->can->GetPad(1)->Connect("RangeChanged()", "GuiController", this, "SyncTimeAxis0()");
@@ -565,6 +573,14 @@ void GuiController::ChannelChanged()
     // Sync the RMS distribution FFT slice if the panel is open
     if (rmsLoaded && rmsDistCanvas)
         UpdateFftSliceForChannel(wfsNo, channel);
+
+    // Propagate channel + range changes to the resamp-check canvas if open
+    if (resampCanvas) {
+        if (!gROOT->GetListOfCanvases()->FindObject("resampCheck"))
+            resampCanvas = nullptr;
+        else
+            RefreshResampCheck();
+    }
 
     // if (cw->badOnlyButton->IsDown()){ // evil mode & print figures
     //     std:string pwd(gSystem->WorkingDirectory());
@@ -1606,6 +1622,9 @@ void GuiController::ReloadFile()
     HideRegionWindow();
     HideRmsWindow();
     HideRmsDistWindow();
+    if (resampCanvas && gROOT->GetListOfCanvases()->FindObject("resampCheck"))
+        resampCanvas->Close();
+    resampCanvas = nullptr;
     EraseRegion();
 
     // Reset analysis caches (hold pointers into old data)
@@ -1665,6 +1684,114 @@ void GuiController::ReloadFile()
 
     mw->SetWindowName(TString::Format("Magnify: run %i, sub-run %i, event %i, anode %i",
         data->runNo, data->subRunNo, data->eventNo, data->anodeNo));
+}
+
+void GuiController::RangeEntryChanged()
+{
+    ChannelChanged();
+}
+
+void GuiController::ShowResampCheckWindow()
+{
+    if (resampCanvas && !gROOT->GetListOfCanvases()->FindObject("resampCheck"))
+        resampCanvas = nullptr;
+    if (!resampCanvas) {
+        resampCanvas = new TCanvas("resampCheck",
+            "Resampling check: orig (512 ns) vs resampled (500 ns)", 1200, 400);
+        resampCanvas->Divide(3, 1, 0.005, 0.005);
+    }
+    if (resampCanvas->GetCanvasImp())
+        resampCanvas->GetCanvasImp()->RaiseWindow();
+
+    // Draw all three planes: active channel's plane first, others at their first channel
+    int ch    = cw->channelEntry->GetNumber();
+    int wfsNo = data->GetPlaneNo(ch);
+    for (int p = 0; p < 3; ++p) {
+        int chan = (p == wfsNo) ? ch : data->wfs.at(p)->firstChannel;
+        RefreshResampCheckPlane(p, chan);
+        resampCanvas->cd(p + 1)->Modified();
+    }
+    resampCanvas->Update();
+}
+
+void GuiController::RefreshResampCheck()
+{
+    if (!resampCanvas) return;
+    if (!gROOT->GetListOfCanvases()->FindObject("resampCheck")) {
+        resampCanvas = nullptr;
+        return;
+    }
+    int ch    = cw->channelEntry->GetNumber();
+    int wfsNo = data->GetPlaneNo(ch);
+    RefreshResampCheckPlane(wfsNo, ch);
+    resampCanvas->cd(wfsNo + 1)->Modified();
+    resampCanvas->cd(wfsNo + 1)->Update();
+}
+
+void GuiController::RefreshResampCheckPlane(int p, int channel)
+{
+    resampCanvas->cd(p + 1);
+    gPad->Clear();
+
+    Waveforms*    wf  = data->wfs.at(p);
+    RawWaveforms* rwf = data->raw_wfs.at(p);
+
+    // Resampled waveform: 500 ns / tick (hu_raw etc.)
+    int nRaw     = wf->nTDCs;
+    int binNoRaw = wf->hOrig->GetXaxis()->FindBin(channel);
+    TGraph* gRaw = new TGraph(nRaw);
+    for (int i = 1; i <= nRaw; ++i)
+        gRaw->SetPoint(i - 1, i * 0.500, wf->hOrig->GetBinContent(binNoRaw, i) * wf->fScale);
+    gRaw->SetLineColor(kRed + 1);    gRaw->SetLineWidth(1);
+    gRaw->SetMarkerColor(kRed + 1);  gRaw->SetMarkerStyle(22); gRaw->SetMarkerSize(0.6);
+
+    // Original waveform: 512 ns / tick (hu_orig etc.), baseline already subtracted
+    int nOrig     = rwf->nTDCs;
+    int binNoOrig = rwf->hOrig->GetXaxis()->FindBin(channel);
+    TGraph* gOrig = new TGraph(nOrig);
+    for (int i = 1; i <= nOrig; ++i)
+        gOrig->SetPoint(i - 1, i * 0.512, rwf->hOrig->GetBinContent(binNoOrig, i));
+    gOrig->SetLineColor(kBlue + 1);   gOrig->SetLineWidth(1);
+    gOrig->SetMarkerColor(kBlue + 1); gOrig->SetMarkerStyle(24); gOrig->SetMarkerSize(0.7);
+
+    // X range: map main-panel tick range → µs at 500 ns/tick
+    double xMin = cw->timeRangeEntry[0]->GetNumber() * 0.500;
+    double xMax = cw->timeRangeEntry[1]->GetNumber() * 0.500;
+    if (xMax <= xMin) xMax = nRaw * 0.500;
+
+    // Y range: manual if set, otherwise auto from both graphs
+    double yMin = cw->adcRangeEntry[0]->GetNumber();
+    double yMax = cw->adcRangeEntry[1]->GetNumber();
+    if (yMax <= yMin) {
+        double x1, y1, x2, y2;
+        yMin = 0; yMax = 0;
+        if (nRaw  > 0) { gRaw->ComputeRange(x1, y1, x2, y2);  yMin = y1; yMax = y2; }
+        if (nOrig > 0) { gOrig->ComputeRange(x1, y1, x2, y2); yMin = std::min(yMin, y1); yMax = std::max(yMax, y2); }
+        if (yMax > yMin) { double margin = 0.1 * (yMax - yMin); yMin -= margin; yMax += margin; }
+        else { yMin = -1; yMax = 1; }
+    }
+
+    const char* pname[3] = {"U", "V", "W"};
+    TH2F* hFrame = new TH2F(
+        TString::Format("hResampFrame_%d", p),
+        TString::Format("Channel %d (%s)", channel, pname[p]),
+        100, xMin, xMax, 100, yMin, yMax);
+    hFrame->SetStats(0);
+    hFrame->GetXaxis()->SetTitle("time [#mus]");
+    hFrame->GetYaxis()->SetTitle("ADC");
+    hFrame->Draw();
+
+    gOrig->Draw("PL SAME");
+    gRaw->Draw("PL SAME");
+
+    TLegend* leg = new TLegend(0.65, 0.75, 0.92, 0.92);
+    leg->SetBorderSize(0);
+    leg->AddEntry(gOrig, "Orig (512 ns)", "PL");
+    leg->AddEntry(gRaw,  "Resamp (500 ns)", "PL");
+    leg->Draw();
+
+    gPad->SetGridx();
+    gPad->SetGridy();
 }
 
 void GuiController::HandleMenu(int id)

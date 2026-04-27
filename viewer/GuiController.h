@@ -68,6 +68,11 @@ public:
     void EraseRegion();
     void ClearRegion();
 
+    // Resampling check window
+    void ShowResampCheckWindow();
+    void RefreshResampCheck();
+    void RangeEntryChanged();
+
     // RMS analysis panel
     void ShowRmsWindow();
     void HideRmsWindow();
@@ -110,6 +115,11 @@ private:
     // Trapezoid boundary lines drawn on the decon pads [plane][edge]
     // edge: 0=left(start), 1=right(end), 2=top, 3=bottom
     TLine* regionBoundary[3][4];
+
+    // Resampling check state
+    TCanvas*              resampCanvas;
+
+    void RefreshResampCheckPlane(int p, int channel);
 
     // RMS analysis state
     TGMainFrame*          rmsWindow;

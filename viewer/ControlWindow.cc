@@ -74,6 +74,9 @@ ControlWindow::ControlWindow(const TGWindow *p, int w, int h)
     rmsBtn = new TGTextButton(group_general, "RMS Analysis");
     group_general->AddFrame(rmsBtn, new TGLayoutHints(kLHintsTop | kLHintsLeft, 6, 2, 2, 2));
 
+    resampCheckBtn = new TGTextButton(group_general, "resamp check");
+    group_general->AddFrame(resampCheckBtn, new TGLayoutHints(kLHintsTop | kLHintsLeft, 6, 2, 2, 2));
+
     TGGroupFrame *group[3];
     for (int i=0; i<3; i++) {
         group[i] = new TGGroupFrame(row1, "", kHorizontalFrame);
