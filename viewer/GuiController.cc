@@ -76,7 +76,10 @@ GuiController::GuiController(const TGWindow *p, int w, int h, const char* fn, do
     rmsStatusLabel  = nullptr;
     rmsOverlayCheck = nullptr;
     rmsUseOrigCheck = nullptr;
+    rmsDistWindow   = nullptr;
     rmsDistCanvas   = nullptr;
+    rmsFreqMin      = nullptr;
+    rmsFreqMax      = nullptr;
     rmsLoaded      = false;
     rmsTopDistPad  = nullptr;
     rmsTopUvPad    = nullptr;
@@ -553,6 +556,11 @@ void GuiController::ChannelChanged()
     vw->can->GetPad(padNo)->SetGridy();
     vw->can->GetPad(padNo)->Modified();
     vw->can->GetPad(padNo)->Update();
+
+    // Sync the RMS distribution FFT slice if the panel is open
+    if (rmsLoaded && rmsDistCanvas)
+        UpdateFftSliceForChannel(wfsNo, channel);
+
     // if (cw->badOnlyButton->IsDown()){ // evil mode & print figures
     //     std:string pwd(gSystem->WorkingDirectory());
     //     pwd += "/../data/Channel" + std::to_string(channel) + ".png";
@@ -1050,6 +1058,11 @@ void GuiController::HideRmsWindow()
     if (rmsWindow) rmsWindow->UnmapWindow();
 }
 
+void GuiController::HideRmsDistWindow()
+{
+    if (rmsDistWindow) rmsDistWindow->UnmapWindow();
+}
+
 void GuiController::ComputeRms()
 {
     bool useOrig = rmsUseOrigCheck && rmsUseOrigCheck->IsDown();
@@ -1140,16 +1153,51 @@ void GuiController::ShowRmsDistribution()
     static const char* planeLetter[3] = {"U", "V", "W"};
     static const Color_t planeColor[3] = {kRed, kBlue, kGreen + 2};
 
-    TString canvName = "rmsDistCanvas";
-    if (!rmsDistCanvas || !gROOT->FindObject(canvName)) {
-        rmsDistCanvas = new TCanvas(canvName, "RMS Noise Distribution", 1100, 900);
+    if (!rmsDistWindow) {
+        rmsDistWindow = new TGMainFrame(gClient->GetRoot(), 1100, 940);
+        rmsDistWindow->SetWindowName("RMS Noise Distribution");
+        rmsDistWindow->DontCallClose();
+        rmsDistWindow->Connect("CloseWindow()", "GuiController", this, "HideRmsDistWindow()");
+
+        // Frequency range control row
+        TGHorizontalFrame* freqRow = new TGHorizontalFrame(rmsDistWindow);
+        rmsDistWindow->AddFrame(freqRow, new TGLayoutHints(kLHintsTop | kLHintsLeft, 8, 8, 6, 2));
+        freqRow->AddFrame(new TGLabel(freqRow, "Freq min:"),
+            new TGLayoutHints(kLHintsLeft | kLHintsCenterY, 2, 4, 2, 2));
+        rmsFreqMin = new TGNumberEntry(freqRow, 0.0, 6, -1,
+            TGNumberFormat::kNESRealTwo,
+            TGNumberFormat::kNEANonNegative,
+            TGNumberFormat::kNELLimitMinMax, 0.0, RmsAnalyzer::kNyquistMHz);
+        rmsFreqMin->Connect("ValueSet(Long_t)", "GuiController", this, "ApplyRmsFreqRange()");
+        freqRow->AddFrame(rmsFreqMin, new TGLayoutHints(kLHintsLeft, 2, 6, 1, 1));
+        freqRow->AddFrame(new TGLabel(freqRow, "max:"),
+            new TGLayoutHints(kLHintsLeft | kLHintsCenterY, 2, 4, 2, 2));
+        rmsFreqMax = new TGNumberEntry(freqRow, RmsAnalyzer::kNyquistMHz, 6, -1,
+            TGNumberFormat::kNESRealTwo,
+            TGNumberFormat::kNEANonNegative,
+            TGNumberFormat::kNELLimitMinMax, 0.0, RmsAnalyzer::kNyquistMHz);
+        rmsFreqMax->Connect("ValueSet(Long_t)", "GuiController", this, "ApplyRmsFreqRange()");
+        freqRow->AddFrame(rmsFreqMax, new TGLayoutHints(kLHintsLeft, 2, 4, 1, 1));
+        freqRow->AddFrame(new TGLabel(freqRow, "MHz"),
+            new TGLayoutHints(kLHintsLeft | kLHintsCenterY, 2, 2, 2, 2));
+
+        // Embedded canvas (takes most of the window)
+        TRootEmbeddedCanvas* rmsDistEmbed = new TRootEmbeddedCanvas("rmsDistEmbed", rmsDistWindow, 1100, 900);
+        rmsDistWindow->AddFrame(rmsDistEmbed,
+            new TGLayoutHints(kLHintsTop | kLHintsExpandX | kLHintsExpandY, 2, 2, 2, 2));
+        rmsDistCanvas = rmsDistEmbed->GetCanvas();
         rmsDistCanvas->Connect(
             "ProcessedEvent(Int_t,Int_t,Int_t,TObject*)",
             "GuiController", this,
             "ProcessRmsCanvasEvent(Int_t,Int_t,Int_t,TObject*)"
         );
+
+        rmsDistWindow->MapSubwindows();
+        rmsDistWindow->Resize(rmsDistWindow->GetDefaultSize());
+        rmsDistWindow->MapWindow();
     } else {
-        rmsDistCanvas->RaiseWindow();
+        rmsDistWindow->RaiseWindow();
+        rmsDistWindow->MapWindow();
     }
 
     // Clear canvas and null the pad pointers (Clear() deletes child pads)
@@ -1345,39 +1393,8 @@ void GuiController::ProcessRmsCanvasEvent(Int_t ev, Int_t x, Int_t y, TObject* s
     int chanNo = TMath::Nint(xx);
     cout << "RMS canvas click: " << padName << "  channel=" << chanNo << endl;
 
-    fftSelectedCh[plane] = chanNo;
-
-    // Update the corresponding bottom FFT pad
-    if (fftSpec[plane] && rmsBotPad[plane]) {
-        static const char* planeLetter[3] = {"U", "V", "W"};
-        static const Color_t planeColor[3] = {kRed, kBlue, kGreen + 2};
-
-        int binX = fftSpec[plane]->GetXaxis()->FindBin((double)chanNo);
-        TString sliceName = TString::Format("hFftSlice_%c", "UVW"[plane]);
-
-        // Remove any previous slice from gROOT's object table
-        TObject* hOld = gROOT->FindObject(sliceName);
-        if (hOld) delete hOld;
-
-        TH1D* hSlice = fftSpec[plane]->ProjectionY(sliceName, binX, binX);
-        hSlice->SetTitle(TString::Format(
-            "%s plane FFT ch %d; freq (MHz); |F| (ADC)",
-            planeLetter[plane], chanNo));
-        hSlice->SetLineColor(planeColor[plane]);
-        hSlice->SetLineWidth(2);
-
-        rmsBotPad[plane]->cd();
-        rmsBotPad[plane]->Clear();
-        hSlice->SetMinimum(0);
-        hSlice->Draw("hist");
-        rmsBotPad[plane]->SetGridx(); rmsBotPad[plane]->SetGridy();
-        rmsBotPad[plane]->Modified();
-        rmsBotPad[plane]->Update();
-        rmsDistCanvas->Modified();
-        rmsDistCanvas->Update();
-    }
-
-    // Also jump the main waveform display to this channel
+    // Jump the main waveform display to this channel; ChannelChanged() will
+    // also sync the FFT slice via UpdateFftSliceForChannel.
     cw->channelEntry->SetNumber(chanNo);
     ChannelChanged();
 }
@@ -1392,6 +1409,93 @@ void GuiController::ToggleRmsUseOrig()
 {
     // Switch the active cache file and reload; user presses Compute if not found.
     LoadRmsFromFile();
+}
+
+void GuiController::ApplyFreqRangeToBotPad(int plane)
+{
+    if (!rmsBotPad[plane]) return;
+    if (!rmsFreqMin || !rmsFreqMax) return;
+    double fmin = rmsFreqMin->GetNumber();
+    double fmax = rmsFreqMax->GetNumber();
+    if (fmin >= fmax) return;
+
+    // Find the primary TH1 drawn in this pad (frame or slice)
+    TH1* h = nullptr;
+    TIter nxt(rmsBotPad[plane]->GetListOfPrimitives());
+    TObject* obj;
+    while ((obj = nxt())) {
+        if (obj->InheritsFrom(TH1::Class())) { h = (TH1*)obj; break; }
+    }
+    if (!h) return;
+
+    h->GetXaxis()->SetRangeUser(fmin, fmax);
+
+    // Auto-scale Y to max content in visible range
+    int binLo = h->GetXaxis()->FindBin(fmin);
+    int binHi = h->GetXaxis()->FindBin(fmax);
+    double yMax = 0;
+    for (int b = binLo; b <= binHi; ++b)
+        if (h->GetBinContent(b) > yMax) yMax = h->GetBinContent(b);
+    h->SetMinimum(0);
+    if (yMax > 0) h->SetMaximum(yMax * 1.15);
+
+    rmsBotPad[plane]->Modified();
+    rmsBotPad[plane]->Update();
+}
+
+void GuiController::ApplyRmsFreqRange()
+{
+    if (!rmsDistCanvas) return;
+    double fmin = rmsFreqMin ? rmsFreqMin->GetNumber() : 0.0;
+    double fmax = rmsFreqMax ? rmsFreqMax->GetNumber() : RmsAnalyzer::kNyquistMHz;
+    if (fmin >= fmax) {
+        printf("RMS freq range: invalid range [%g, %g] — ignored\n", fmin, fmax);
+        return;
+    }
+    for (int p = 0; p < 3; ++p)
+        ApplyFreqRangeToBotPad(p);
+    rmsDistCanvas->Modified();
+    rmsDistCanvas->Update();
+}
+
+void GuiController::UpdateFftSliceForChannel(int plane, int chanNo)
+{
+    if (!rmsLoaded || !rmsDistCanvas) return;
+    if (plane < 0 || plane > 2) return;
+    if (!fftSpec[plane] || !rmsBotPad[plane]) return;
+
+    static const char* planeLetter[3] = {"U", "V", "W"};
+    static const Color_t planeColor[3] = {kRed, kBlue, kGreen + 2};
+
+    int binX = fftSpec[plane]->GetXaxis()->FindBin((double)chanNo);
+    TString sliceName = TString::Format("hFftSlice_%c", "UVW"[plane]);
+
+    TObject* hOld = gROOT->FindObject(sliceName);
+    if (hOld) delete hOld;
+
+    TH1D* hSlice = fftSpec[plane]->ProjectionY(sliceName, binX, binX);
+    hSlice->SetTitle(TString::Format(
+        "%s plane FFT ch %d; freq (MHz); |F| (ADC)",
+        planeLetter[plane], chanNo));
+    hSlice->SetLineColor(planeColor[plane]);
+    hSlice->SetLineWidth(2);
+
+    rmsBotPad[plane]->cd();
+    rmsBotPad[plane]->Clear();
+    hSlice->SetMinimum(0);
+    hSlice->Draw("hist");
+    rmsBotPad[plane]->SetGridx();
+    rmsBotPad[plane]->SetGridy();
+
+    // Apply current freq range (persists across channel changes)
+    ApplyFreqRangeToBotPad(plane);
+
+    rmsBotPad[plane]->Modified();
+    rmsBotPad[plane]->Update();
+    rmsDistCanvas->Modified();
+    rmsDistCanvas->Update();
+
+    fftSelectedCh[plane] = chanNo;
 }
 
 void GuiController::OnAnodeChanged(Int_t id)
@@ -1439,6 +1543,7 @@ void GuiController::ReloadFile()
 
     HideRegionWindow();
     HideRmsWindow();
+    HideRmsDistWindow();
     EraseRegion();
 
     // Reset analysis caches (hold pointers into old data)
@@ -1447,7 +1552,10 @@ void GuiController::ReloadFile()
         fftSpec[p] = nullptr;
         fftSelectedCh[p] = -1;
         rmsResults[p].clear();
+        rmsMidPad[p] = nullptr;
+        rmsBotPad[p] = nullptr;
     }
+    rmsTopDistPad = nullptr; rmsTopUvPad = nullptr; rmsTopWPad = nullptr;
     rmsLoaded = false;
 
     for (int i = 1; i <= 9; ++i) {
