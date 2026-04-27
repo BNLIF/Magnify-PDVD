@@ -72,10 +72,11 @@ GuiController::GuiController(const TGWindow *p, int w, int h, const char* fn, do
         regTLowE[p]  = regTHighE[p]  = nullptr;
         for (int e = 0; e < 4; ++e) regionBoundary[p][e] = nullptr;
     }
-    rmsWindow      = nullptr;
-    rmsStatusLabel = nullptr;
+    rmsWindow       = nullptr;
+    rmsStatusLabel  = nullptr;
     rmsOverlayCheck = nullptr;
-    rmsDistCanvas  = nullptr;
+    rmsUseOrigCheck = nullptr;
+    rmsDistCanvas   = nullptr;
     rmsLoaded      = false;
     rmsTopDistPad  = nullptr;
     rmsTopUvPad    = nullptr;
@@ -1011,11 +1012,19 @@ void GuiController::ShowRmsWindow()
 
         // Overlay checkbox
         TGHorizontalFrame* overlayRow = new TGHorizontalFrame(rmsWindow);
-        rmsWindow->AddFrame(overlayRow, new TGLayoutHints(kLHintsTop | kLHintsLeft, 8, 8, 4, 8));
+        rmsWindow->AddFrame(overlayRow, new TGLayoutHints(kLHintsTop | kLHintsLeft, 8, 8, 4, 2));
         rmsOverlayCheck = new TGCheckButton(overlayRow, "Overlay 4σ on 1D waveform");
         rmsOverlayCheck->SetState(kButtonUp);
         rmsOverlayCheck->Connect("Toggled(Bool_t)", "GuiController", this, "ToggleRmsOverlay()");
         overlayRow->AddFrame(rmsOverlayCheck, new TGLayoutHints(kLHintsLeft, 2, 2, 2, 2));
+
+        // Source-mode checkbox
+        TGHorizontalFrame* origRow = new TGHorizontalFrame(rmsWindow);
+        rmsWindow->AddFrame(origRow, new TGLayoutHints(kLHintsTop | kLHintsLeft, 8, 8, 2, 8));
+        rmsUseOrigCheck = new TGCheckButton(origRow, "Use original waveform (hu_orig / hv_orig / hw_orig)");
+        rmsUseOrigCheck->SetState(kButtonUp);
+        rmsUseOrigCheck->Connect("Toggled(Bool_t)", "GuiController", this, "ToggleRmsUseOrig()");
+        origRow->AddFrame(rmsUseOrigCheck, new TGLayoutHints(kLHintsLeft, 2, 2, 2, 2));
 
         rmsWindow->MapSubwindows();
         rmsWindow->Resize(rmsWindow->GetDefaultSize());
@@ -1025,8 +1034,9 @@ void GuiController::ShowRmsWindow()
         rmsWindow->MapWindow();
     }
 
-    // Refresh status label to show current cache filename
-    TString cacheFile = RmsAnalyzer::CacheFilename(data->rootFile->GetName());
+    // Refresh status label to show current cache filename (mode-aware)
+    bool useOrig = rmsUseOrigCheck && rmsUseOrigCheck->IsDown();
+    TString cacheFile = RmsAnalyzer::CacheFilename(data->rootFile->GetName(), useOrig);
     bool exists = !gSystem->AccessPathName(cacheFile.Data());
     rmsStatusLabel->SetText(
         exists ? TString::Format("%s  [EXISTS]", cacheFile.Data()).Data()
@@ -1042,12 +1052,15 @@ void GuiController::HideRmsWindow()
 
 void GuiController::ComputeRms()
 {
-    printf("RMS Analysis: computing (with FFT) ...\n");
+    bool useOrig = rmsUseOrigCheck && rmsUseOrigCheck->IsDown();
+    printf("RMS Analysis: computing (with FFT, source=%s) ...\n",
+           useOrig ? "original" : "raw");
     static const char* fftKey[3] = {"fft_u", "fft_v", "fft_w"};
     TH2F* newFft[3] = {nullptr, nullptr, nullptr};
 
     for (int p = 0; p < 3; ++p) {
-        TH2F* h = data->wfs.at(p)->hOrig;
+        TH2* h = useOrig ? (TH2*)data->raw_wfs.at(p)->hOrig
+                         : (TH2*)data->wfs.at(p)->hOrig;
         if (!h) {
             printf("RMS Analysis: plane %d hOrig is null, skipping\n", p);
             rmsResults[p].clear();
@@ -1066,14 +1079,15 @@ void GuiController::ComputeRms()
         fftSelectedCh[p] = -1;
     }
 
-    TString cacheFile = RmsAnalyzer::CacheFilename(data->rootFile->GetName());
+    TString cacheFile = RmsAnalyzer::CacheFilename(data->rootFile->GetName(), useOrig);
     RmsAnalyzer::Save(rmsResults[0], rmsResults[1], rmsResults[2],
                       fftSpec[0], fftSpec[1], fftSpec[2], cacheFile.Data());
     rmsLoaded = true;
 
     if (rmsStatusLabel)
         rmsStatusLabel->SetText(
-            TString::Format("%s  [EXISTS]", cacheFile.Data()).Data()
+            TString::Format("%s  [EXISTS%s]", cacheFile.Data(),
+                useOrig ? ", original" : "").Data()
         );
     if (rmsWindow) rmsWindow->Layout();
     printf("RMS Analysis: done.\n");
@@ -1081,7 +1095,8 @@ void GuiController::ComputeRms()
 
 void GuiController::LoadRmsFromFile()
 {
-    TString cacheFile = RmsAnalyzer::CacheFilename(data->rootFile->GetName());
+    bool useOrig = rmsUseOrigCheck && rmsUseOrigCheck->IsDown();
+    TString cacheFile = RmsAnalyzer::CacheFilename(data->rootFile->GetName(), useOrig);
     TH2F* newFft[3] = {nullptr, nullptr, nullptr};
     if (!RmsAnalyzer::Load(cacheFile.Data(),
                            rmsResults[0], rmsResults[1], rmsResults[2],
@@ -1090,7 +1105,7 @@ void GuiController::LoadRmsFromFile()
         rmsLoaded = false;
         if (rmsStatusLabel)
             rmsStatusLabel->SetText(
-                TString::Format("%s  [LOAD FAILED]", cacheFile.Data()).Data()
+                TString::Format("%s  [not found]", cacheFile.Data()).Data()
             );
     } else {
         // Replace stored FFT spectra (may be nullptr for pre-FFT cache files)
@@ -1107,8 +1122,9 @@ void GuiController::LoadRmsFromFile()
             hasFft ? "  [FFT OK]" : "  [no FFT]");
         if (rmsStatusLabel)
             rmsStatusLabel->SetText(
-                TString::Format("%s  [LOADED%s]", cacheFile.Data(),
-                    hasFft ? "+FFT" : "").Data()
+                TString::Format("%s  [LOADED%s%s]", cacheFile.Data(),
+                    hasFft ? "+FFT" : "",
+                    useOrig ? ", original" : "").Data()
             );
     }
     if (rmsWindow) rmsWindow->Layout();
@@ -1370,6 +1386,12 @@ void GuiController::ToggleRmsOverlay()
 {
     // Redraw the current 1D waveform to add or remove the overlay
     ChannelChanged();
+}
+
+void GuiController::ToggleRmsUseOrig()
+{
+    // Switch the active cache file and reload; user presses Compute if not found.
+    LoadRmsFromFile();
 }
 
 void GuiController::OnAnodeChanged(Int_t id)

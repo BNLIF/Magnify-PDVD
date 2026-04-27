@@ -1,5 +1,6 @@
 #include "RmsAnalyzer.h"
 
+#include "TH2.h"
 #include "TH2F.h"
 #include "TFile.h"
 #include "TTree.h"
@@ -125,7 +126,7 @@ static void clampSignalForFft(const vector<float>& sig, float baseline, float rm
 
 // ---- public API ----
 
-vector<ChannelRms> RmsAnalyzer::AnalyzePlane(TH2F* h)
+vector<ChannelRms> RmsAnalyzer::AnalyzePlane(TH2* h)
 {
     vector<ChannelRms> result;
     if (!h) return result;
@@ -156,7 +157,7 @@ vector<ChannelRms> RmsAnalyzer::AnalyzePlane(TH2F* h)
     return result;
 }
 
-vector<ChannelRms> RmsAnalyzer::AnalyzePlaneWithFft(TH2F* h,
+vector<ChannelRms> RmsAnalyzer::AnalyzePlaneWithFft(TH2* h,
                                                     const char* fftHistName,
                                                     TH2F*& outFft)
 {
@@ -380,6 +381,11 @@ bool RmsAnalyzer::Load(const char* inFile,
 TString RmsAnalyzer::CacheFilename(const char* magnifyFile)
 {
     return TString(magnifyFile) + ".rms.root";
+}
+
+TString RmsAnalyzer::CacheFilename(const char* magnifyFile, bool useOrig)
+{
+    return TString(magnifyFile) + (useOrig ? ".orig.rms.root" : ".rms.root");
 }
 
 void RmsAnalyzer::AnalyzeFile(const char* inFile)

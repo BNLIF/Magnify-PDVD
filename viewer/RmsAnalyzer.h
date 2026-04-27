@@ -4,6 +4,7 @@
 #include <vector>
 #include "TString.h"
 
+class TH2;
 class TH2F;
 
 struct ChannelRms {
@@ -26,14 +27,16 @@ public:
     static constexpr double kTickMicroseconds = 0.5;
     static constexpr double kNyquistMHz       = 1.0 / (2.0 * kTickMicroseconds);
 
-    // Compute per-channel RMS for all channels in the plane TH2F (channel × tick).
-    static std::vector<ChannelRms> AnalyzePlane(TH2F* h);
+    // Compute per-channel RMS for all channels in the plane histogram (channel × tick).
+    // Accepts any TH2 (TH2F, TH2I, …) via the common base class.
+    static std::vector<ChannelRms> AnalyzePlane(TH2* h);
 
     // Like AnalyzePlane but also computes per-channel FFT spectra (signal regions
     // clamped to ±4σ, baseline subtracted).  Results are stored in a TH2F with
     // X = channel and Y = frequency [0, kNyquistMHz] detached from gDirectory.
     // Caller takes ownership of outFft (may be nullptr on failure).
-    static std::vector<ChannelRms> AnalyzePlaneWithFft(TH2F* h,
+    // Accepts any TH2 (TH2F, TH2I, …) as input.
+    static std::vector<ChannelRms> AnalyzePlaneWithFft(TH2* h,
                                                        const char* fftHistName,
                                                        TH2F*& outFft);
 
@@ -65,8 +68,10 @@ public:
                      std::vector<ChannelRms>& w,
                      TH2F*& fftU, TH2F*& fftV, TH2F*& fftW);
 
-    // Returns "<magnifyFile>.rms.root"
+    // Returns "<magnifyFile>.rms.root" (denoised mode, backward-compatible).
     static TString CacheFilename(const char* magnifyFile);
+    // Returns "<magnifyFile>.orig.rms.root" when useOrig==true, else ".rms.root".
+    static TString CacheFilename(const char* magnifyFile, bool useOrig);
 
     // Convenience batch entry point: open inFile, discover histograms, run all
     // three planes (RMS + FFT), and write results to CacheFilename(inFile).

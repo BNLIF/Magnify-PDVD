@@ -78,6 +78,17 @@ The algorithm follows the WCT percentile-based method (matching `Microboone.cxx`
 
 Results are stored in a `TTree` (one row per channel) inside the `.rms.root` cache file and are automatically loaded by the viewer at startup to apply per-channel Wiener thresholds.
 
+#### Interactive RMS Analysis Panel (in-viewer)
+
+Click **RMS Analysis** in the control window to open the RMS panel.  It supports two source modes:
+
+| Checkbox | Source histograms | Cache file |
+| --- | --- | --- |
+| unchecked (default) | `hu_raw` / `hv_raw` / `hw_raw` (denoised) | `<file>.rms.root` |
+| **Use original waveform** | `hu_orig` / `hv_orig` / `hw_orig` (raw ADC) | `<file>.orig.rms.root` |
+
+Toggling the checkbox immediately loads the cache for the selected mode (status shows `[not found]` if the cache does not yet exist — press **Compute RMS** to generate it).  The two modes use separate cache files so switching back and forth is instantaneous once both caches exist.  The number of time ticks adapts automatically to whichever source histogram is selected.
+
 ### (Experimental feature) Channel Scan
 ```
 ./channelscan.sh path/to/rootfile

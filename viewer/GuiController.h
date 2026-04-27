@@ -75,6 +75,7 @@ public:
     void LoadRmsFromFile();
     void ShowRmsDistribution();
     void ToggleRmsOverlay();
+    void ToggleRmsUseOrig();
     void ProcessRmsCanvasEvent(Int_t ev, Int_t x, Int_t y, TObject* selected);
 
     void OnAnodeChanged(Int_t id);
@@ -111,6 +112,7 @@ private:
     TGMainFrame*          rmsWindow;
     TGLabel*              rmsStatusLabel;
     TGCheckButton*        rmsOverlayCheck;
+    TGCheckButton*        rmsUseOrigCheck;
     TCanvas*              rmsDistCanvas;
     std::vector<ChannelRms> rmsResults[3];  // per-plane results (U=0,V=1,W=2)
     bool                  rmsLoaded;
