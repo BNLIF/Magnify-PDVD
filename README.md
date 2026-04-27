@@ -102,6 +102,27 @@ Click **Show distribution** to open the distribution window.  It contains a 9-pa
 | Freq min | 0.00 MHz | Lower bound of the FFT X axis |
 | Freq max | 1.00 MHz | Upper bound of the FFT X axis (Nyquist) |
 
+### Resampling Check Window
+
+Click **resamp check** in the General group of the control window to open a 1×3 canvas comparing the original (512 ns/tick) and Wire-Cell resampled (500 ns/tick) waveforms for the active channel, one pad per plane (U/V/W).
+
+Each pad shows both waveforms as TGraphs on a common **time-in-µs** x-axis:
+
+| Trace | Source histogram | Tick width | Style |
+| --- | --- | --- | --- |
+| Blue open circles | `hu_orig` / `hv_orig` / `hw_orig` (raw ADC, baseline-subtracted) | 512 ns | `TGraph "PL"` |
+| Red filled triangles | `hu_raw` / `hv_raw` / `hw_raw` (Wire-Cell resampled) | 500 ns | `TGraph "PL"` |
+
+Because both traces are drawn as discrete sample markers connected by a thin line (not stair-step histograms), you can directly check whether each resampled point lands on the curve interpolated through the original samples.
+
+**Sync with the main panel:**
+
+- **Channel:** changing the channel entry redraws the matching plane's pad automatically; the other two pads retain their last-drawn channel (same behavior as the bottom three waveform pads in the main canvas).
+- **X range:** editing the `x range` entries and pressing Enter applies the range to both the main panel and the resamp-check canvas (converted to µs: ticks × 0.500).
+- **Y range:** editing the `y range` entries and pressing Enter applies to both. Setting both entries to 0 restores auto-range from the waveform data.
+
+Switching to a different event or anode closes the resamp-check canvas automatically to prevent access to freed waveform data.
+
 ### (Experimental feature) Channel Scan
 ```
 ./channelscan.sh path/to/rootfile
