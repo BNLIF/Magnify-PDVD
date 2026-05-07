@@ -63,6 +63,7 @@ GuiController::GuiController(const TGWindow *p, int w, int h, const char* fn, do
     else {
         filename = fn;
     }
+    printf("Loading: %s\n", filename.Data());
     data = new Data(filename.Data(), threshold, frame, rebin);
     captureMode = CAPTURE_NONE;
     regionWindow = nullptr;
@@ -1618,6 +1619,7 @@ void GuiController::ReloadFile()
         cerr << "ReloadFile: file not found: " << path << endl;
         return;
     }
+    printf("Loading: %s\n", path.Data());
 
     HideRegionWindow();
     HideRmsWindow();
