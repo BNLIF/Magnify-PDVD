@@ -147,6 +147,8 @@ private:
 
     // Navigation state
     TString              inputDataDir;
+    TString              fileNamePrefix;  // e.g. "magnify-" (before run%s-evt%s-anode%d)
+    TString              fileNameSuffix;  // e.g. "-dnnron" (after anode digits, before .root)
     std::vector<TString> eventTags;
     std::vector<int>     evtRuns;
     std::vector<int>     evtNums;

@@ -130,6 +130,18 @@ GuiController::GuiController(const TGWindow *p, int w, int h, const char* fn, do
         int apos = base.Index("anode");
         if (apos != kNPOS && apos + 5 < base.Length())
             curAnode = atoi(base.Data() + apos + 5);
+        // Infer file name template: prefix (before "run{run}") and suffix (after "anode{N}", before ".root")
+        int undx = evtTag.Index('_');
+        TString runStr = (undx > 0) ? TString(evtTag(0, undx)) : evtTag;
+        int rpos = base.Index(TString("run") + runStr);
+        fileNamePrefix = (rpos != kNPOS) ? TString(base(0, rpos)) : TString("magnify-");
+        TString anodeMarker = TString::Format("anode%d", curAnode);
+        int apos2 = base.Index(anodeMarker);
+        if (apos2 != kNPOS) {
+            int suffStart = apos2 + anodeMarker.Length();
+            int dotPos = base.Last('.');
+            fileNameSuffix = (dotPos > suffStart) ? TString(base(suffStart, dotPos - suffStart)) : TString("");
+        }
     }
 
     // Scan inputDataDir for strictly-named <run>_<event> subdirectories
@@ -162,12 +174,14 @@ GuiController::GuiController(const TGWindow *p, int w, int h, const char* fn, do
                 TString evtStr = name(undx + 1, name.Length() - undx - 1);
                 int run = atoi(runStr.Data());
                 int evt = atoi(evtStr.Data());
-                // Probe for at least one anode file (preserve dir-name formatting)
-                TString probe = TString::Format("%s/%s/magnify-run%s-evt%s-anode0.root",
-                    inputDataDir.Data(), name.Data(), runStr.Data(), evtStr.Data());
+                // Probe for at least one anode file using the detected naming template
+                TString probe = TString::Format("%s/%s/%srun%s-evt%s-anode0%s.root",
+                    inputDataDir.Data(), name.Data(),
+                    fileNamePrefix.Data(), runStr.Data(), evtStr.Data(), fileNameSuffix.Data());
                 if (gSystem->AccessPathName(probe.Data())) {
-                    probe = TString::Format("%s/%s/magnify-run%s-evt%s-anode1.root",
-                        inputDataDir.Data(), name.Data(), runStr.Data(), evtStr.Data());
+                    probe = TString::Format("%s/%s/%srun%s-evt%s-anode1%s.root",
+                        inputDataDir.Data(), name.Data(),
+                        fileNamePrefix.Data(), runStr.Data(), evtStr.Data(), fileNameSuffix.Data());
                     if (gSystem->AccessPathName(probe.Data())) continue;
                 }
                 found.emplace_back(run, evt, name);
@@ -1613,8 +1627,9 @@ void GuiController::ReloadFile()
     int undx = tag.Index('_');
     TString runStr = (undx > 0) ? TString(tag(0, undx)) : tag;
     TString evtStr = (undx > 0) ? TString(tag(undx + 1, tag.Length() - undx - 1)) : TString("0");
-    TString path = TString::Format("%s/%s/magnify-run%s-evt%s-anode%d.root",
-        inputDataDir.Data(), tag.Data(), runStr.Data(), evtStr.Data(), curAnode);
+    TString path = TString::Format("%s/%s/%srun%s-evt%s-anode%d%s.root",
+        inputDataDir.Data(), tag.Data(),
+        fileNamePrefix.Data(), runStr.Data(), evtStr.Data(), curAnode, fileNameSuffix.Data());
     if (gSystem->AccessPathName(path.Data())) {
         cerr << "ReloadFile: file not found: " << path << endl;
         return;
